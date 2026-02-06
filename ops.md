@@ -14,6 +14,30 @@ From the repo root:
 pnpm install
 ```
 
+## Setup (initialize config + workspace)
+
+To initialize `~/.openclaw/openclaw.json` and seed the default workspace (like the installed CLI),
+run `setup` via the local repo entrypoint:
+
+```bash
+pnpm openclaw setup
+```
+
+### Common options
+
+```bash
+pnpm openclaw setup --workspace ~/.openclaw/workspace
+pnpm openclaw setup --wizard
+```
+
+### Isolated dev profile (recommended for experimenting)
+
+This keeps state/config/workspace separate (does not touch your main `~/.openclaw`):
+
+```bash
+pnpm openclaw --dev setup
+```
+
 ## Run the Gateway (foreground)
 
 Build the Control UI assets once (so the UI is served by the Gateway), set `gateway.mode=local`,
@@ -28,7 +52,7 @@ pnpm openclaw gateway
 ### Common flags
 
 ```bash
-pnpm openclaw gateway --port 18789     # choose port (default is usually 18789)
+pnpm openclaw gateway --port 51442     # choose port (default is usually 18789)
 pnpm openclaw gateway --verbose        # more console logs
 pnpm openclaw gateway --force          # reclaim port if it is already in use
 pnpm openclaw gateway --bind loopback  # default bind
@@ -45,9 +69,9 @@ pnpm openclaw gateway --allow-unconfigured
 The Control UI is a small Vite + Lit single-page app served on the **same port** as the Gateway
 WebSocket.
 
-- Default: `http://127.0.0.1:18789/` (or `http://localhost:18789/`)
+- Default: `http://127.0.0.1:51442/` (or `http://localhost:51442/`)
 - Optional prefix: set `gateway.controlUi.basePath` (e.g. `/openclaw`)
-  - Example URL: `http://127.0.0.1:18789/openclaw`
+  - Example URL: `http://127.0.0.1:51442/openclaw`
 
 ## Dev loop (auto-reload)
 
