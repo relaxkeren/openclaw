@@ -26,6 +26,7 @@ import { loadVoiceWakeConfig } from "../../../infra/voicewake.js";
 import { rawDataToString } from "../../../infra/ws.js";
 import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-channel.js";
 import { authorizeGatewayConnect, isLocalDirectRequest } from "../../auth.js";
+import { isAuthEnabled, verifyAccessToken } from "../../auth/session.js";
 import { buildDeviceAuthPayload } from "../../device-auth.js";
 import { isLoopbackAddress, isTrustedProxyAddress, resolveGatewayClientIp } from "../../net.js";
 import { resolveNodeCommandAllowlist } from "../../node-command-policy.js";
@@ -410,30 +411,177 @@ export function attachGatewayWsMessageHandler(params: {
         const allowControlUiBypass = allowInsecureControlUi || disableControlUiDeviceAuth;
         const device = disableControlUiDeviceAuth ? null : deviceRaw;
 
-        const authResult = await authorizeGatewayConnect({
-          auth: resolvedAuth,
-          connectAuth: connectParams.auth,
-          req: upgradeReq,
-          trustedProxies,
-        });
-        let authOk = authResult.ok;
-        let authMethod =
-          authResult.method ?? (resolvedAuth.mode === "password" ? "password" : "token");
-        const sharedAuthResult = hasSharedAuth
-          ? await authorizeGatewayConnect({
-              auth: { ...resolvedAuth, allowTailscale: false },
-              connectAuth: connectParams.auth,
-              req: upgradeReq,
-              trustedProxies,
-            })
-          : null;
-        const sharedAuthOk =
-          sharedAuthResult?.ok === true &&
-          (sharedAuthResult.method === "token" || sharedAuthResult.method === "password");
+        // Declare auth variables outside the conditional blocks
+        let authOk: boolean;
+        let authMethod: string;
+        let sharedAuthOk = false;
+        let authResult: Awaited<ReturnType<typeof authorizeGatewayConnect>> | null = null;
+
+        // When session auth is enabled: Control UI and remote clients use JWT only;
+        // local loopback non–Control-UI may use legacy token/password (Option A).
+        if (isAuthEnabled()) {
+          const jwtToken = connectParams.auth?.token;
+          const canUseLegacyOnLoopback =
+            isLocalClient && connectParams.client.id !== GATEWAY_CLIENT_IDS.CONTROL_UI;
+
+          if (!canUseLegacyOnLoopback) {
+            // Control UI or remote: JWT only
+            if (!jwtToken) {
+              setHandshakeState("failed");
+              setCloseCause("unauthorized", {
+                authMode: "session",
+                authProvided: "none",
+                authReason: "jwt_missing",
+                client: connectParams.client.id,
+                clientDisplayName: connectParams.client.displayName,
+                mode: connectParams.client.mode,
+                version: connectParams.client.version,
+              });
+              send({
+                type: "res",
+                id: frame.id,
+                ok: false,
+                error: errorShape(
+                  ErrorCodes.INVALID_REQUEST,
+                  "Authentication required. Please log in.",
+                ),
+              });
+              close(1008, "Authentication required");
+              return;
+            }
+            const jwtPayload = verifyAccessToken(jwtToken);
+            if (!jwtPayload) {
+              setHandshakeState("failed");
+              setCloseCause("token-expired", {
+                client: connectParams.client.id,
+                clientDisplayName: connectParams.client.displayName,
+                mode: connectParams.client.mode,
+                version: connectParams.client.version,
+              });
+              send({
+                type: "res",
+                id: frame.id,
+                ok: false,
+                error: errorShape(
+                  ErrorCodes.INVALID_REQUEST,
+                  "Session expired. Please log in again.",
+                ),
+              });
+              close(1008, "Token expired");
+              return;
+            }
+            authOk = true;
+            authMethod = "token";
+          } else {
+            // Local loopback, non–Control-UI: try JWT first, then legacy token/password
+            const jwtPayload = jwtToken ? verifyAccessToken(jwtToken) : null;
+            if (jwtPayload) {
+              authOk = true;
+              authMethod = "token";
+            } else {
+              authResult = await authorizeGatewayConnect({
+                auth: resolvedAuth,
+                connectAuth: connectParams.auth,
+                req: upgradeReq,
+                trustedProxies,
+              });
+              authOk = authResult.ok;
+              authMethod =
+                authResult.method ?? (resolvedAuth.mode === "password" ? "password" : "token");
+              const sharedAuthResult = hasSharedAuth
+                ? await authorizeGatewayConnect({
+                    auth: { ...resolvedAuth, allowTailscale: false },
+                    connectAuth: connectParams.auth,
+                    req: upgradeReq,
+                    trustedProxies,
+                  })
+                : null;
+              sharedAuthOk =
+                sharedAuthResult?.ok === true &&
+                (sharedAuthResult.method === "token" || sharedAuthResult.method === "password");
+              if (!authOk) {
+                const authProvided: AuthProvidedKind = connectParams.auth?.token
+                  ? "token"
+                  : connectParams.auth?.password
+                    ? "password"
+                    : "none";
+                const authMessage = formatGatewayAuthFailureMessage({
+                  authMode: resolvedAuth.mode,
+                  authProvided,
+                  reason: authResult.reason,
+                  client: connectParams.client,
+                });
+                setHandshakeState("failed");
+                setCloseCause("unauthorized", {
+                  authMode: resolvedAuth.mode,
+                  authProvided,
+                  authReason: authResult.reason,
+                  client: connectParams.client.id,
+                  clientDisplayName: connectParams.client.displayName,
+                  mode: connectParams.client.mode,
+                  version: connectParams.client.version,
+                });
+                send({
+                  type: "res",
+                  id: frame.id,
+                  ok: false,
+                  error: errorShape(ErrorCodes.INVALID_REQUEST, authMessage),
+                });
+                close(1008, truncateCloseReason(authMessage));
+                return;
+              }
+            }
+          }
+        } else {
+          // Legacy gateway token auth (when session auth not enabled)
+          authResult = await authorizeGatewayConnect({
+            auth: resolvedAuth,
+            connectAuth: connectParams.auth,
+            req: upgradeReq,
+            trustedProxies,
+          });
+          authOk = authResult.ok;
+          authMethod =
+            authResult.method ?? (resolvedAuth.mode === "password" ? "password" : "token");
+          const sharedAuthResult = hasSharedAuth
+            ? await authorizeGatewayConnect({
+                auth: { ...resolvedAuth, allowTailscale: false },
+                connectAuth: connectParams.auth,
+                req: upgradeReq,
+                trustedProxies,
+              })
+            : null;
+          sharedAuthOk =
+            sharedAuthResult?.ok === true &&
+            (sharedAuthResult.method === "token" || sharedAuthResult.method === "password");
+        }
+
         const rejectUnauthorized = () => {
           setHandshakeState("failed");
+
+          // Handle session auth case separately from legacy auth
+          if (isAuthEnabled()) {
+            // Session auth: JWT validation already handled above
+            // This should not be reached, but handle defensively
+            logWsControl.warn(
+              `unauthorized conn=${connId} remote=${remoteAddr ?? "?"} client=${clientLabel} ${connectParams.client.mode} v${connectParams.client.version} reason=session_auth_failed`,
+            );
+            send({
+              type: "res",
+              id: frame.id,
+              ok: false,
+              error: errorShape(
+                ErrorCodes.INVALID_REQUEST,
+                "Authentication required. Please log in.",
+              ),
+            });
+            close(1008, "Authentication required");
+            return;
+          }
+
+          // Legacy gateway token auth
           logWsControl.warn(
-            `unauthorized conn=${connId} remote=${remoteAddr ?? "?"} client=${clientLabel} ${connectParams.client.mode} v${connectParams.client.version} reason=${authResult.reason ?? "unknown"}`,
+            `unauthorized conn=${connId} remote=${remoteAddr ?? "?"} client=${clientLabel} ${connectParams.client.mode} v${connectParams.client.version} reason=${authResult?.reason ?? "unknown"}`,
           );
           const authProvided: AuthProvidedKind = connectParams.auth?.token
             ? "token"
@@ -443,13 +591,13 @@ export function attachGatewayWsMessageHandler(params: {
           const authMessage = formatGatewayAuthFailureMessage({
             authMode: resolvedAuth.mode,
             authProvided,
-            reason: authResult.reason,
+            reason: authResult?.reason,
             client: connectParams.client,
           });
           setCloseCause("unauthorized", {
             authMode: resolvedAuth.mode,
             authProvided,
-            authReason: authResult.reason,
+            authReason: authResult?.reason,
             allowTailscale: resolvedAuth.allowTailscale,
             client: connectParams.client.id,
             clientDisplayName: connectParams.client.displayName,
@@ -487,7 +635,8 @@ export function attachGatewayWsMessageHandler(params: {
           }
 
           // Allow shared-secret authenticated connections (e.g., control-ui) to skip device identity
-          if (!canSkipDevice) {
+          // Skip this check when session auth is enabled (already handled above)
+          if (!canSkipDevice && !isAuthEnabled()) {
             if (!authOk && hasSharedAuth) {
               rejectUnauthorized();
               return;
@@ -670,7 +819,8 @@ export function attachGatewayWsMessageHandler(params: {
             authMethod = "device-token";
           }
         }
-        if (!authOk) {
+        // Skip legacy device auth checks when session auth is enabled
+        if (!authOk && !isAuthEnabled()) {
           rejectUnauthorized();
           return;
         }

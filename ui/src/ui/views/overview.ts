@@ -8,7 +8,6 @@ export type OverviewProps = {
   connected: boolean;
   hello: GatewayHelloOk | null;
   settings: UiSettings;
-  password: string;
   lastError: string | null;
   presenceCount: number;
   sessionsCount: number | null;
@@ -16,7 +15,6 @@ export type OverviewProps = {
   cronNext: number | null;
   lastChannelsRefresh: number | null;
   onSettingsChange: (next: UiSettings) => void;
-  onPasswordChange: (next: string) => void;
   onSessionKeyChange: (next: string) => void;
   onConnect: () => void;
   onRefresh: () => void;
@@ -37,32 +35,10 @@ export function renderOverview(props: OverviewProps) {
     if (!authFailed) {
       return null;
     }
-    const hasToken = Boolean(props.settings.token.trim());
-    const hasPassword = Boolean(props.password.trim());
-    if (!hasToken && !hasPassword) {
-      return html`
-        <div class="muted" style="margin-top: 8px">
-          This gateway requires auth. Add a token or password, then click Connect.
-          <div style="margin-top: 6px">
-            <span class="mono">openclaw dashboard --no-open</span> → open the Control UI<br />
-            <span class="mono">openclaw doctor --generate-gateway-token</span> → set token
-          </div>
-          <div style="margin-top: 6px">
-            <a
-              class="session-link"
-              href="https://docs.openclaw.ai/web/dashboard"
-              target="_blank"
-              rel="noreferrer"
-              title="Control UI auth docs (opens in new tab)"
-              >Docs: Control UI auth</a
-            >
-          </div>
-        </div>
-      `;
-    }
     return html`
       <div class="muted" style="margin-top: 8px">
-        Auth failed. Update the token or password in Control UI settings, then click Connect.
+        Session may have expired. Sign out and sign in again from the login page, or refresh and
+        reconnect.
         <div style="margin-top: 6px">
           <a
             class="session-link"
@@ -134,29 +110,6 @@ export function renderOverview(props: OverviewProps) {
                 props.onSettingsChange({ ...props.settings, gatewayUrl: v });
               }}
               placeholder="ws://100.x.y.z:18789"
-            />
-          </label>
-          <label class="field">
-            <span>Gateway Token</span>
-            <input
-              .value=${props.settings.token}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onSettingsChange({ ...props.settings, token: v });
-              }}
-              placeholder="OPENCLAW_GATEWAY_TOKEN"
-            />
-          </label>
-          <label class="field">
-            <span>Password (not stored)</span>
-            <input
-              type="password"
-              .value=${props.password}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onPasswordChange(v);
-              }}
-              placeholder="system or shared password"
             />
           </label>
           <label class="field">

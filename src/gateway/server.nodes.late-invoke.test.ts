@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
+import { login } from "./auth/session.js";
 
 vi.mock("../infra/update-runner.js", () => ({
   runGatewayUpdate: vi.fn(async () => ({
@@ -25,6 +26,8 @@ installGatewayTestHooks({ scope: "suite" });
 let server: Awaited<ReturnType<typeof startServerWithClient>>["server"];
 let ws: WebSocket;
 let port: number;
+/** JWT or legacy token for connect; session auth uses JWT when AUTH_EMAIL/AUTH_PASSWORD are set. */
+let connectToken: string;
 
 beforeAll(async () => {
   const token = "test-gateway-token-1234567890";
@@ -32,7 +35,9 @@ beforeAll(async () => {
   server = started.server;
   ws = started.ws;
   port = started.port;
-  await connectOk(ws, { token });
+  const loginResult = login("test@example.com", "test-password");
+  connectToken = loginResult.success ? loginResult.response.accessToken : token;
+  await connectOk(ws, { token: connectToken });
 });
 
 afterAll(async () => {
@@ -60,7 +65,7 @@ describe("late-arriving invoke results", () => {
           mode: GATEWAY_CLIENT_MODES.NODE,
         },
         commands: ["canvas.snapshot"],
-        token: "test-gateway-token-1234567890",
+        token: connectToken,
       });
 
       // Send an invoke result with an unknown ID (simulating late arrival after timeout)
@@ -99,6 +104,7 @@ describe("late-arriving invoke results", () => {
           mode: GATEWAY_CLIENT_MODES.NODE,
         },
         commands: [],
+        token: connectToken,
       });
 
       const identity = loadOrCreateDeviceIdentity();

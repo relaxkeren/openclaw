@@ -622,5 +622,57 @@ describe("gateway server auth/connect", () => {
     }
   });
 
+  describe("session auth with local loopback legacy token (Option A)", () => {
+    let server: Awaited<ReturnType<typeof startGatewayServer>>;
+    let port: number;
+
+    beforeAll(async () => {
+      // Session auth is already enabled by installGatewayTestHooks (AUTH_EMAIL/AUTH_PASSWORD).
+      // resetGatewayTestState sets testState.gatewayAuth = { token: "test-gateway-token-1234567890" }.
+      port = await getFreePort();
+      server = await startGatewayServer(port);
+    });
+
+    afterAll(async () => {
+      await server.close();
+    });
+
+    test("accepts legacy token from local loopback when client is not Control UI", async () => {
+      const ws = await openWs(port);
+      const res = await connectReq(ws, {
+        token: "test-gateway-token-1234567890",
+        device: null,
+        client: {
+          id: GATEWAY_CLIENT_NAMES.CLI,
+          version: "1.0.0",
+          platform: "node",
+          mode: GATEWAY_CLIENT_MODES.CLI,
+        },
+      });
+      expect(res.ok).toBe(true);
+      expect((res.payload as { type?: string } | undefined)?.type).toBe("hello-ok");
+      ws.close();
+    });
+
+    test("rejects legacy token only when client is Control UI (JWT required)", async () => {
+      const ws = await openWs(port);
+      const res = await connectReq(ws, {
+        token: "test-gateway-token-1234567890",
+        device: null,
+        client: {
+          id: GATEWAY_CLIENT_NAMES.CONTROL_UI,
+          version: "1.0.0",
+          platform: "web",
+          mode: GATEWAY_CLIENT_MODES.WEBCHAT,
+        },
+      });
+      expect(res.ok).toBe(false);
+      expect(res.error?.message ?? "").toMatch(
+        /Token expired|Session expired|Authentication required/,
+      );
+      ws.close();
+    });
+  });
+
   // Remaining tests require isolated gateway state.
 });

@@ -100,8 +100,15 @@ export function tabFromPath(pathname: string, basePath = ""): Tab | null {
   return PATH_TO_TAB.get(normalized) ?? null;
 }
 
+/** Login is a route, not an app mount point. Top-level /login → ""; e.g. /ui/login → infer from /ui. */
 export function inferBasePathFromPathname(pathname: string): string {
   let normalized = normalizePath(pathname);
+  if (normalized === "/login" || normalized.startsWith("/login/")) {
+    return "";
+  }
+  if (normalized.endsWith("/login") || normalized.includes("/login/")) {
+    normalized = normalizePath(normalized.replace(/\/login\/?.*$/, "")) || "/";
+  }
   if (normalized.endsWith("/index.html")) {
     normalized = normalizePath(normalized.slice(0, -"/index.html".length));
   }
