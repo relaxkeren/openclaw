@@ -13,6 +13,8 @@ This document describes the unified authentication mechanism for the OpenClaw Co
 - Unified authentication for both HTTP and WebSocket connections
 - Cross-tab session synchronization
 
+**Implementation status:** The JWT flow described below is implemented and in use when `AUTH_EMAIL` and `AUTH_PASSWORD` are set. The "Existing Token/Password Authentication (Legacy)" section describes the older shared-secret behavior when session auth is not enabled.
+
 ---
 
 ## Unified JWT Authentication
@@ -31,7 +33,7 @@ The authentication system uses a single JWT token for all authentication purpose
 
 ### 2. Refresh Token (HttpOnly Cookie)
 
-- **Storage**: HttpOnly, SameSite=Strict, Secure cookie
+- **Storage**: HttpOnly, SameSite=Strict cookie; **Secure** flag when using HTTPS (set `AUTH_COOKIE_SECURE=false` for HTTP localhost so the cookie is stored)
 - **Lifetime**: 7 days (configurable)
 - **Contents**: Random opaque string (UUID) mapping to server-side session
 - **Transport**: Automatically sent by browser with cookie
@@ -281,11 +283,11 @@ Tab A                    Tab B
 
 ---
 
-## Existing Token/Password Authentication (Current Implementation)
+## Existing Token/Password Authentication (Legacy)
 
 ### Overview
 
-The current authentication system uses **shared secrets** (token or password) configured via environment variables or config file. Unlike the Split Token Pattern design above, this is a simpler system without user identity or session management.
+When Control UI **session auth is not enabled** (no `AUTH_EMAIL`/`AUTH_PASSWORD`), the gateway may use **shared secrets** (token or password) configured via environment variables or config file. Unlike the Split Token Pattern design above, this is a simpler system without user identity or session management.
 
 **Key Security Behavior:**
 
@@ -1058,10 +1060,10 @@ if (response.status === 401) {
 
 ## Security Considerations
 
-### 1. HTTPS Required
+### 1. HTTPS and Cookie Secure Flag
 
-- Authentication only works over HTTPS (except localhost development)
-- `AUTH_COOKIE_SECURE=true` enforces this
+- In production use HTTPS and keep `AUTH_COOKIE_SECURE=true` (default) so the refresh cookie is only sent over secure connections.
+- For local development over HTTP (e.g. `http://localhost:51442`), set `AUTH_COOKIE_SECURE=false` so the browser will store and send the refresh cookie; otherwise refresh requests return 401 after login.
 
 ### 2. Brute Force Protection
 

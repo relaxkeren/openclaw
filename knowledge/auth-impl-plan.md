@@ -247,17 +247,18 @@ CONTROL UI SPA:
 **Details**:
 
 - Auth routes handled before static file serving
-- Public paths allowed without auth: /login, /assets/, static files
-- Authenticated paths redirect to /login?redirect=<path>
+- Public paths allowed without auth: /login, /login/\* (assets served as files), /assets/, static files
+- Unauthenticated requests redirect to /login (no redirect query param)
 - CORS headers for auth endpoints
+- Static assets under /login/ (e.g. /login/assets/_.js, _.css) served as files to avoid MIME-type errors when the app is loaded from /login or /login/overview
 
 **Evaluation**:
 
 - [x] /api/auth/\* routes accessible
-- [x] /login route serves login page
+- [x] /login route serves login page; /login/assets/_ and /login/_.js etc. serve actual files
 - [x] Unauthenticated requests to / redirect to /login
 - [x] Authenticated requests allowed through
-- [x] Redirect parameter preserved for post-login redirect
+- [x] Post-login always redirects to home (no redirect param)
 
 ---
 
@@ -330,7 +331,7 @@ CONTROL UI SPA:
 
 **Details**:
 
-- Schedule refresh 60 seconds before token expiry
+- Schedule refresh 5 minutes before token expiry
 - Cancel scheduled refresh on logout
 - Visibility change detection (refresh when tab becomes active)
 - Countdown tracking for rate limit UI
@@ -410,7 +411,7 @@ CONTROL UI SPA:
 - [x] Auth initializes on app start
 - [x] Login view shown when not authenticated
 - [x] Main app shown when authenticated
-- [x] Redirect to original URL after login
+- [x] Redirect to home after login (simplified; no redirect param)
 - [x] No memory leaks from subscriptions
 
 ---
@@ -1227,6 +1228,11 @@ See [Authentication Documentation](https://docs.openclaw.ai/configuration/auth) 
 
 ## 📝 CHANGE LOG
 
+### 2025-02-07 - Login URL and Asset Serving Fixes ✅
+
+- **Control UI server** (`src/gateway/control-ui.ts`): Requests under `/login/` that are static assets (e.g. `/login/assets/*`, `/login/*.js`, `/login/*.css`) are now served as actual files from the UI root instead of `index.html`, fixing "Expected a JavaScript module but server responded with text/html" when opening e.g. `http://localhost:51442/login/overview`.
+- **Navigation** (`ui/src/ui/navigation.ts`, `ui/src/ui/app-settings.ts`): `/login` is not treated as an app base path (so basePath is not `/login` when on the login page). When the current path is the login page, `syncTabWithLocation` no longer rewrites the URL to `/login/chat`, keeping the URL on `/login` or `/login/overview` until after login. Post-login redirect goes to home with correct base path.
+
 ### 2025-02-07 - Remaining Auth UI Tasks Delivered ✅
 
 - ✅ **Task 32**: Cross-tab sync via `auth-sync.ts` (BroadcastChannel + storage fallback); auth-context subscribes and broadcasts LOGIN/LOGOUT/TOKEN_REFRESH.
@@ -1412,7 +1418,12 @@ See [Authentication Documentation](https://docs.openclaw.ai/configuration/auth) 
 
 ### Next Action Items
 
-- All planned auth UI tasks are complete. Optional: fix GET /api/auth/me test, add frontend unit tests, or proceed to security hardening.
+- All planned auth UI tasks are complete. Login redirect, /login asset serving, and navigation fixes are in place.
+- **Remaining (optional):**
+  - Fix GET /api/auth/me integration test (skipped; returns 401 in test env).
+  - Frontend auth unit tests.
+  - Security hardening (e.g. bcrypt for password hashing, audit logging).
+  - Session binding (IP/user agent), OAuth/OpenID Connect (future).
 
 ---
 
