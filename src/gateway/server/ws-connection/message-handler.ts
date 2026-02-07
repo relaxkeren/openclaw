@@ -26,6 +26,7 @@ import { loadVoiceWakeConfig } from "../../../infra/voicewake.js";
 import { rawDataToString } from "../../../infra/ws.js";
 import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-channel.js";
 import { authorizeGatewayConnect, isLocalDirectRequest } from "../../auth.js";
+import { isAuthEnabled, verifyAccessToken } from "../../auth/session.js";
 import { buildDeviceAuthPayload } from "../../device-auth.js";
 import { isLoopbackAddress, isTrustedProxyAddress, resolveGatewayClientIp } from "../../net.js";
 import { resolveNodeCommandAllowlist } from "../../node-command-policy.js";
@@ -430,6 +431,39 @@ export function attachGatewayWsMessageHandler(params: {
         const sharedAuthOk =
           sharedAuthResult?.ok === true &&
           (sharedAuthResult.method === "token" || sharedAuthResult.method === "password");
+
+        // Check for JWT token (new session-based auth)
+        const jwtToken = connectParams.auth?.token;
+        let jwtPayload: ReturnType<typeof verifyAccessToken> = null;
+        if (jwtToken && isAuthEnabled()) {
+          jwtPayload = verifyAccessToken(jwtToken);
+          if (jwtPayload) {
+            // JWT is valid - consider authentication successful
+            authOk = true;
+            authMethod = "token";
+          } else {
+            // JWT is present but invalid - reject with token expired error
+            setHandshakeState("failed");
+            setCloseCause("token-expired", {
+              client: connectParams.client.id,
+              clientDisplayName: connectParams.client.displayName,
+              mode: connectParams.client.mode,
+              version: connectParams.client.version,
+            });
+            send({
+              type: "res",
+              id: frame.id,
+              ok: false,
+              error: errorShape(
+                ErrorCodes.INVALID_REQUEST,
+                "Token expired. Please refresh or login again.",
+              ),
+            });
+            close(1008, "Token expired");
+            return;
+          }
+        }
+
         const rejectUnauthorized = () => {
           setHandshakeState("failed");
           logWsControl.warn(

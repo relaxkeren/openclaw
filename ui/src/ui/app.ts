@@ -1,7 +1,8 @@
-import { LitElement } from "lit";
+import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { EventLogEntry } from "./app-events.ts";
 import type { AppViewState } from "./app-view-state.ts";
+import type { AuthState } from "./auth/types.ts";
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
@@ -77,9 +78,19 @@ import {
   type CompactionStatus,
 } from "./app-tool-stream.ts";
 import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
+import {
+  authState,
+  initAuth,
+  login,
+  logout,
+  clearError,
+  useAuth,
+  subscribeAuthState,
+} from "./auth/auth-context.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
+import { renderLogin } from "./views/login.ts";
 
 declare global {
   interface Window {
@@ -159,6 +170,12 @@ export class OpenClawApp extends LitElement {
   @state() execApprovalBusy = false;
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
+
+  // Auth state
+  @state() auth: AuthState = authState;
+  @state() loginEmail = "";
+  @state() loginPassword = "";
+  private _authUnsubscribe: (() => void) | null = null;
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -352,12 +369,25 @@ export class OpenClawApp extends LitElement {
     handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
   }
 
-  protected firstUpdated() {
+  protected async firstUpdated() {
     handleFirstUpdated(this as unknown as Parameters<typeof handleFirstUpdated>[0]);
+
+    // Initialize auth - check for existing session
+    await initAuth();
+
+    // Subscribe to auth state changes
+    this._authUnsubscribe = subscribeAuthState(() => {
+      this.auth = { ...authState };
+      this.requestUpdate();
+    });
   }
 
   disconnectedCallback() {
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
+    if (this._authUnsubscribe) {
+      this._authUnsubscribe();
+      this._authUnsubscribe = null;
+    }
     super.disconnectedCallback();
   }
 
@@ -564,6 +594,47 @@ export class OpenClawApp extends LitElement {
   }
 
   render() {
+    // Show login view if not authenticated and auth is not loading
+    if (!this.auth.isAuthenticated && !this.auth.isLoading) {
+      return renderLogin({
+        email: this.loginEmail,
+        password: this.loginPassword,
+        isLoading: this.auth.isLoading,
+        error: this.auth.error?.message ?? null,
+        rateLimitCountdown: this.auth.rateLimitCountdown,
+        onEmailChange: (email) => {
+          this.loginEmail = email;
+        },
+        onPasswordChange: (password) => {
+          this.loginPassword = password;
+        },
+        onSubmit: async () => {
+          const success = await login(this.loginEmail, this.loginPassword);
+          if (success) {
+            // Clear login form
+            this.loginEmail = "";
+            this.loginPassword = "";
+            // Get redirect URL or go to default
+            const params = new URLSearchParams(window.location.search);
+            const redirect = params.get("redirect") || "/";
+            window.history.replaceState({}, "", redirect);
+            // Connect to gateway
+            this.connect();
+          }
+        },
+        onClearError: () => {
+          clearError();
+        },
+      });
+    }
+
+    // Show loading state while auth is initializing
+    if (this.auth.isLoading) {
+      return html`
+        <div class="loading-screen">Loading...</div>
+      `;
+    }
+
     return renderApp(this as unknown as AppViewState);
   }
 }

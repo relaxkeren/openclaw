@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { CanvasHostServer } from "../canvas-host/server.js";
 import type { PluginServicesHandle } from "../plugins/services.js";
@@ -10,6 +11,7 @@ import { initSubagentRegistry } from "../agents/subagent-registry.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { createDefaultDeps } from "../cli/deps.js";
+import { parseDurationMs } from "../cli/parse-duration.js";
 import {
   CONFIG_PATH,
   isNixMode,
@@ -42,6 +44,8 @@ import { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
 import { runOnboardingWizard } from "../wizard/onboarding.js";
+import { startRateLimitCleanup } from "./auth/rate-limit.js";
+import { initializeAuth, startSessionCleanup } from "./auth/session.js";
 import { startGatewayConfigReloader } from "./config-reload.js";
 import { ExecApprovalManager } from "./exec-approval-manager.js";
 import { NodeRegistry } from "./node-registry.js";
@@ -268,6 +272,48 @@ export async function startGatewayServer(
   } = runtimeConfig;
   let hooksConfig = runtimeConfig.hooksConfig;
   const canvasHostEnabled = runtimeConfig.canvasHostEnabled;
+
+  // Initialize Control UI session-based authentication
+  const authEmail = process.env.AUTH_EMAIL || "";
+  const authPassword = process.env.AUTH_PASSWORD || "";
+  let stopSessionCleanup: (() => void) | null = null;
+  let stopRateLimitCleanup: (() => void) | null = null;
+
+  // Validate auth configuration - both required
+  if (!authEmail || !authPassword) {
+    throw new Error(
+      "Control UI authentication is required. " +
+        "Please set both AUTH_EMAIL and AUTH_PASSWORD environment variables. " +
+        "Example: AUTH_EMAIL=admin@example.com AUTH_PASSWORD=yourpassword",
+    );
+  }
+
+  if (authEmail && authPassword) {
+    const parseDurationSeconds = (raw: string, defaultValue: string): number => {
+      try {
+        return Math.floor(parseDurationMs(raw) / 1000);
+      } catch {
+        return Math.floor(parseDurationMs(defaultValue) / 1000);
+      }
+    };
+
+    const sessionAuthConfig = {
+      email: authEmail,
+      password: authPassword,
+      accessTokenTtl: parseDurationSeconds(process.env.AUTH_ACCESS_TOKEN_TTL || "", "15m"),
+      refreshTokenTtl: parseDurationSeconds(process.env.AUTH_REFRESH_TOKEN_TTL || "", "7d"),
+      jwtSecret: process.env.AUTH_JWT_SECRET || randomUUID(),
+      cookieSecure: process.env.AUTH_COOKIE_SECURE !== "false",
+      rateLimitEnabled: process.env.AUTH_RATE_LIMIT_ENABLED !== "false",
+      rateLimitStrict: process.env.AUTH_RATE_LIMIT_STRICT === "true",
+    };
+
+    initializeAuth(sessionAuthConfig);
+    stopSessionCleanup = startSessionCleanup(60 * 60 * 1000); // Every hour
+    stopRateLimitCleanup = startRateLimitCleanup(10 * 60 * 1000); // Every 10 minutes
+
+    log.info("[auth] Control UI authentication enabled");
+  }
 
   let controlUiRootState: ControlUiRootState | undefined;
   if (controlUiRootOverride) {
@@ -632,6 +678,13 @@ export async function startGatewayServer(
         skillsRefreshTimer = null;
       }
       skillsChangeUnsub();
+      // Clean up auth intervals
+      if (stopSessionCleanup) {
+        stopSessionCleanup();
+      }
+      if (stopRateLimitCleanup) {
+        stopRateLimitCleanup();
+      }
       await close(opts);
     },
   };

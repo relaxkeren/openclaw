@@ -687,7 +687,7 @@ src/gateway/auth/
 ### Environment Variables
 
 ```bash
-# Required
+# Required (BOTH must be set together, or neither)
 AUTH_EMAIL=admin@example.com
 AUTH_PASSWORD=secure-password-here
 
@@ -700,6 +700,23 @@ AUTH_COOKIE_SECURE=true          # Secure cookie flag
 AUTH_RATE_LIMIT_ENABLED=true     # Enable rate limiting
 AUTH_RATE_LIMIT_STRICT=false     # Always enforce (even behind proxy)
 ```
+
+> ⚠️ **Authentication Required**: Control UI authentication is **mandatory**. The gateway will refuse to start if authentication is not configured.
+>
+> | Scenario                                       | Result                                        |
+> | ---------------------------------------------- | --------------------------------------------- |
+> | Both `AUTH_EMAIL` and `AUTH_PASSWORD` set      | ✅ Control UI authentication enabled          |
+> | Either `AUTH_EMAIL` or `AUTH_PASSWORD` missing | ❌ **Fatal Error** - Gateway refuses to start |
+>
+> **Error Message:**
+>
+> ```
+> Control UI authentication is required.
+> Please set both AUTH_EMAIL and AUTH_PASSWORD environment variables.
+> Example: AUTH_EMAIL=admin@example.com AUTH_PASSWORD=yourpassword
+> ```
+>
+> **Why mandatory?** Ensures the Control UI is always protected. No accidental unprotected deployments.
 
 ### Session Store
 
@@ -992,6 +1009,28 @@ if (response.status === 401) {
 ---
 
 ## Configuration Examples
+
+### Validation Examples
+
+#### ✅ Valid: Both authentication variables set
+
+```bash
+export AUTH_EMAIL="admin@example.com"
+export AUTH_PASSWORD="secure-password"
+openclaw gateway run
+# Output: [auth] Control UI authentication enabled
+```
+
+#### ❌ Invalid: Missing AUTH_EMAIL or AUTH_PASSWORD (Fatal Error)
+
+```bash
+# Missing authentication configuration
+openclaw gateway run
+# ERROR: Gateway fails to start
+# Control UI authentication is required.
+# Please set both AUTH_EMAIL and AUTH_PASSWORD environment variables.
+# Example: AUTH_EMAIL=admin@example.com AUTH_PASSWORD=yourpassword
+```
 
 ### Minimal Setup
 

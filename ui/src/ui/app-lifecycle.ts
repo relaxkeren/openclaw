@@ -17,6 +17,7 @@ import {
   syncTabWithLocation,
   syncThemeWithSettings,
 } from "./app-settings.ts";
+import { initAuth } from "./auth/auth-context.ts";
 
 type LifecycleHost = {
   basePath: string;
@@ -52,6 +53,15 @@ export function handleConnected(host: LifecycleHost) {
 
 export function handleFirstUpdated(host: LifecycleHost) {
   observeTopbar(host as unknown as Parameters<typeof observeTopbar>[0]);
+}
+
+export async function handleAuthInitialized(isAuthenticated: boolean) {
+  // Auth is initialized - if authenticated, the app will connect to gateway
+  // If not authenticated, the login view will be shown
+  if (isAuthenticated) {
+    // Re-trigger connection if needed
+    // This is handled by the app component re-rendering and connecting
+  }
 }
 
 export function handleDisconnected(host: LifecycleHost) {

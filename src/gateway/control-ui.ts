@@ -4,6 +4,9 @@ import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveControlUiRootSync } from "../infra/control-ui-assets.js";
 import { DEFAULT_ASSISTANT_IDENTITY, resolveAssistantIdentity } from "./assistant-identity.js";
+import { buildAuthContext } from "./auth/middleware.js";
+import { handleAuthRoute, handleAuthPreflight, setAuthCorsHeaders } from "./auth/routes.js";
+import { isAuthEnabled, getAuthConfig } from "./auth/session.js";
 import {
   buildControlUiAvatarUrl,
   CONTROL_UI_AVATAR_PREFIX,
@@ -245,16 +248,65 @@ export function handleControlUiHttpRequest(
   if (!urlRaw) {
     return false;
   }
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.statusCode = 405;
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.end("Method Not Allowed");
+
+  // Handle CORS preflight for auth routes
+  if (handleAuthPreflight(req, res)) {
     return true;
   }
 
   const url = new URL(urlRaw, "http://localhost");
   const basePath = normalizeControlUiBasePath(opts?.basePath);
   const pathname = url.pathname;
+
+  // Handle auth API routes first
+  if (pathname.startsWith("/api/auth/")) {
+    const authConfig = getAuthConfig();
+    if (authConfig) {
+      // Set CORS headers for auth endpoints
+      const origin = req.headers.origin || "*";
+      setAuthCorsHeaders(res, origin);
+    }
+
+    if (handleAuthRoute(req, res, pathname)) {
+      return true;
+    }
+  }
+
+  // Check authentication for Control UI access
+  if (isAuthEnabled() && req.method === "GET") {
+    // Allow access to login page and auth-related assets without authentication
+    const isPublicPath =
+      pathname === "/login" ||
+      pathname.startsWith("/login/") ||
+      pathname === "/api/auth/login" ||
+      pathname.startsWith("/assets/") ||
+      pathname.endsWith(".js") ||
+      pathname.endsWith(".css") ||
+      pathname.endsWith(".ico");
+
+    if (!isPublicPath) {
+      const authContext = buildAuthContext(req);
+
+      if (!authContext.isAuthenticated) {
+        // Redirect to login page
+        applyControlUiSecurityHeaders(res);
+        res.statusCode = 302;
+        res.setHeader(
+          "Location",
+          `${basePath || ""}/login?redirect=${encodeURIComponent(pathname)}`,
+        );
+        res.end();
+        return true;
+      }
+    }
+  }
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.statusCode = 405;
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end("Method Not Allowed");
+    return true;
+  }
 
   if (!basePath) {
     if (pathname === "/ui" || pathname.startsWith("/ui/")) {
@@ -278,6 +330,32 @@ export function handleControlUiHttpRequest(
   }
 
   applyControlUiSecurityHeaders(res);
+
+  // Handle login page route
+  if (pathname === "/login" || pathname.startsWith("/login/")) {
+    const rootState = opts?.root;
+    const root =
+      rootState?.kind === "resolved"
+        ? rootState.path
+        : resolveControlUiRootSync({
+            moduleUrl: import.meta.url,
+            argv1: process.argv[1],
+            cwd: process.cwd(),
+          });
+
+    if (root) {
+      // Serve index.html for login page - the frontend will handle showing login UI
+      const indexPath = path.join(root, "index.html");
+      if (fs.existsSync(indexPath)) {
+        serveIndexHtml(res, indexPath, {
+          basePath,
+          config: opts?.config,
+          agentId: opts?.agentId,
+        });
+        return true;
+      }
+    }
+  }
 
   const rootState = opts?.root;
   if (rootState?.kind === "invalid") {
