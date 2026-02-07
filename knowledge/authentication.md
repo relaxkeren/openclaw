@@ -2,36 +2,42 @@
 
 ## Overview
 
-This document describes the authentication mechanism for the OpenClaw Control UI using the **Split Token Pattern** (industry gold standard for SPA authentication).
+This document describes the unified authentication mechanism for the OpenClaw Control UI using **JWT-based session authentication**. The JWT access token serves dual purposes: Control UI session management and WebSocket/API authentication.
 
 ## Goals
 
-- Secure email/password authentication for Control UI access
+- Mandatory email/password authentication for Control UI access
 - Protection against XSS, CSRF, and token theft
 - Simple deployment (credentials via environment variables)
 - Seamless user experience with automatic token refresh
-- No breaking changes to existing WebSocket RPC architecture
+- Unified authentication for both HTTP and WebSocket connections
+- Cross-tab session synchronization
+
+**Implementation status:** The JWT flow described below is implemented and in use when `AUTH_EMAIL` and `AUTH_PASSWORD` are set. The "Existing Token/Password Authentication (Legacy)" section describes the older shared-secret behavior when session auth is not enabled.
 
 ---
 
-## Split Token Pattern
+## Unified JWT Authentication
 
-The Split Token Pattern separates authentication into two tokens:
+The authentication system uses a single JWT token for all authentication purposes:
 
-### 1. Access Token (Short-lived JWT)
+### 1. JWT Access Token (Session + Gateway Auth)
 
 - **Storage**: Browser memory only (never localStorage/cookies)
 - **Lifetime**: 15 minutes
-- **Contents**: User identity, permissions, expiration
-- **Transport**: HTTP `Authorization: Bearer <token>` header and WebSocket auth
+- **Purpose**: Both Control UI session and WebSocket/API authentication
+- **Transport**:
+  - HTTP: `Authorization: Bearer <token>` header
+  - WebSocket: `connect.auth.token` field
 - **Algorithm**: HS256 (HMAC-SHA256)
 
-### 2. Refresh Token (Long-lived Opaque Token)
+### 2. Refresh Token (HttpOnly Cookie)
 
-- **Storage**: HttpOnly, SameSite=Strict, Secure cookie
+- **Storage**: HttpOnly, SameSite=Strict cookie; **Secure** flag when using HTTPS (set `AUTH_COOKIE_SECURE=false` for HTTP localhost so the cookie is stored)
 - **Lifetime**: 7 days (configurable)
 - **Contents**: Random opaque string (UUID) mapping to server-side session
 - **Transport**: Automatically sent by browser with cookie
+- **Purpose**: Silent re-authentication after page refresh
 
 ### Security Benefits
 
@@ -42,58 +48,73 @@ The Split Token Pattern separates authentication into two tokens:
 | Token interception  | Short-lived access tokens, automatic refresh     |
 | Replay attacks      | Token binding to session, rotation on refresh    |
 | Logout issues       | Server can invalidate refresh tokens immediately |
+| Unauthorized access | Mandatory authentication - no bypass             |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Control UI SPA                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Login View   │  │ Auth Context │  │ Protected Routes     │  │
-│  │              │  │ (in-memory   │  │ (check auth state)   │  │
-│  │ - Email      │  │  access      │  │                      │  │
-│  │ - Password   │  │  token)      │  │                      │  │
-│  │ - Submit     │  │              │  │                      │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────────────┘  │
-│         │                 │                                      │
-│         └─────────────────┘                                      │
-│                    │                                             │
-│    ┌───────────────┴───────────────┐                            │
-│    │  Token Refresh (background)  │                            │
-│    │  - 1 min before expiry       │                            │
-│    │  - Silent iframe/promise     │                            │
-│    └───────────────────────────────┘                            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ HTTP / WebSocket
-┌─────────────────────────────────────────────────────────────────┐
-│                         Gateway Server                          │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  HTTP Middleware Stack                                     ││
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  ││
-│  │  │ CORS     │ │ Cookie   │ │ Auth     │ │ Static/      │  ││
-│  │  │ Setup    │ │ Parser   │ │ Check    │ │ API Routes   │  ││
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  ││
-│  └─────────────────────────────────────────────────────────────┘│
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  WebSocket Auth Layer                                      ││
-│  │  - Verify access token in connect.auth.token               ││
-│  │  - Fallback: check httpOnly cookie for refresh flow       ││
-│  └─────────────────────────────────────────────────────────────┘│
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  Auth Service (src/gateway/auth/session.ts)                ││
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      ││
-│  │  │ Credential   │  │ Token        │  │ Session      │      ││
-│  │  │ Validation   │  │ Generation   │  │ Management   │      ││
-│  │  └──────────────┘  └──────────────┘  └──────────────┘      ││
-│  └─────────────────────────────────────────────────────────────┘│
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  Session Store (in-memory, per-gateway)                    ││
-│  │  Map<refreshToken, { userId, email, expiresAt, issuedAt }> ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Control UI SPA (Unified JWT)                     │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                        Full-Screen Login                          │ │
+│  │  ┌─────────────────────────────────────────────────────────────┐ │ │
+│  │  │                    Background Image                          │ │ │
+│  │  │                                                              │ │ │
+│  │  │         ┌─────────────────────────────────┐                  │ │ │
+│  │  │         │      Login Card               │                  │ │ │
+│  │  │         │  ┌─────────────────────────┐  │                  │ │ │
+│  │  │         │  │ 📧 Email Input         │  │                  │ │ │
+│  │  │         │  │ 🔒 Password Input      │  │                  │ │ │
+│  │  │         │  │ [    Sign In    ]      │  │                  │ │ │
+│  │  │         │  │                        │  │                  │ │ │
+│  │  │         │  │ Error Message Display  │  │                  │ │ │
+│  │  │         │  └─────────────────────────┘  │                  │ │ │
+│  │  │         └─────────────────────────────────┘                  │ │ │
+│  │  └─────────────────────────────────────────────────────────────┘ │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                        Auth Context                             │   │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │   │
+│  │  │ initAuth()   │  │ Token Refresh│  │ Cross-Tab Sync       │  │   │
+│  │  │ - Check mem  │  │ - 5 min pre  │  │ - BroadcastChannel   │  │   │
+│  │  │ - Try cookie │  │ - Silent     │  │ - storage event      │  │   │
+│  │  │ - Set state  │  │ - Update mem │  │ - Sync login/logout  │  │   │
+│  │  └──────────────┘  └──────────────┘  └──────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼ HTTP / WebSocket (Same JWT)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Gateway Server                                  │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  Unified Auth Layer (JWT Only)                                     ││
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────────┐  ││
+│  │  │ CORS     │ │ Cookie   │ │ JWT      │ │ Protected           │  ││
+│  │  │ Setup    │ │ Parser   │ │ Verify   │ │ Routes/API/WS       │  ││
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────────────┘  ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  WebSocket Auth                                                     ││
+│  │  - Extract JWT from connect.auth.token                              ││
+│  │  - Verify with HS256                                                ││
+│  │  - Reject with 1008 if missing/invalid                              ││
+│  │  - Same JWT for both HTTP and WebSocket                             ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  Auth Service (src/gateway/auth/session.ts)                        ││
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              ││
+│  │  │ Login        │  │ JWT          │  │ Refresh      │              ││
+│  │  │ Validation   │  │ Generation   │  │ Token Mgmt   │              ││
+│  │  └──────────────┘  └──────────────┘  └──────────────┘              ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  Session Store (in-memory)                                         ││
+│  │  Map<refreshToken, { email, accessTokenJti, expiresAt, issuedAt }> ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -172,21 +193,80 @@ Control UI              Gateway
      │                      │
 ```
 
-### 4. WebSocket Connection Flow
+### 4. WebSocket Connection Flow (Unified JWT)
 
 ```
 Control UI              Gateway
      │                      │
      │  WS CONNECT          │
-     │  query: ?token=...   │
-     │  OR header           │
+     │  connect frame:      │
+     │  { auth: {          │
+     │      token: <JWT>    │
+     │    }                 │
+     │  }                   │
      │─────────────────────>│
      │                      │
-     │                      │  Verify access token
-     │                      │  from query param
+     │                      │  Verify JWT signature
+     │                      │  Check expiration
      │                      │
-     │  connect.challenge   │
+     │  Valid JWT:          │
+     │  connect.success     │
      │<─────────────────────│
+     │                      │
+     │  Invalid/Missing:    │
+     │  CLOSE 1008          │
+     │  "Authentication     │
+     │   required"          │
+     │<─────────────────────│
+     │                      │
+```
+
+### 5. Page Refresh / Session Recovery Flow
+
+```
+Browser
+   │
+   ▼
+Page Load
+   │
+   ▼
+SHOW "Checking authentication..."
+   │
+   ▼
+TRY REFRESH
+POST /api/auth/refresh
+(Cookie auto-sent)
+   │
+   ├─ SUCCESS ──> Store JWT in memory
+   │              Hide loading screen
+   │              Show full app
+   │              Connect WebSocket
+   │
+   └─ FAILURE ──> Clear auth state
+                  Show login page only
+                  (Block WebSocket attempts)
+```
+
+### 6. Cross-Tab Synchronization Flow
+
+```
+Tab A                    Tab B
+  │                        │
+  │  Login Successful      │
+  │───────────────────────>│ (BroadcastChannel/storage event)
+  │                        │
+  │                        │  Receive auth update
+  │                        │  Sync auth state
+  │                        │  Show app (if logged in)
+  │                        │
+  │  Logout                │
+  │───────────────────────>│ (BroadcastChannel/storage event)
+  │                        │
+  │                        │  Receive logout event
+  │                        │  Clear auth state
+  │                        │  Show login page
+```
+
      │                      │
      │  connect {           │
      │    auth: {           │
@@ -198,15 +278,16 @@ Control UI              Gateway
      │  hello-ok            │
      │<─────────────────────│
      │                      │
-```
+
+````
 
 ---
 
-## Existing Token/Password Authentication (Current Implementation)
+## Existing Token/Password Authentication (Legacy)
 
 ### Overview
 
-The current authentication system uses **shared secrets** (token or password) configured via environment variables or config file. Unlike the Split Token Pattern design above, this is a simpler system without user identity or session management.
+When Control UI **session auth is not enabled** (no `AUTH_EMAIL`/`AUTH_PASSWORD`), the gateway may use **shared secrets** (token or password) configured via environment variables or config file. Unlike the Split Token Pattern design above, this is a simpler system without user identity or session management.
 
 **Key Security Behavior:**
 
@@ -236,7 +317,7 @@ OPENCLAW_GATEWAY_PASSWORD=<shared-password>
     }
   }
 }
-```
+````
 
 ### Auth Modes
 
@@ -687,7 +768,7 @@ src/gateway/auth/
 ### Environment Variables
 
 ```bash
-# Required
+# Required (BOTH must be set together, or neither)
 AUTH_EMAIL=admin@example.com
 AUTH_PASSWORD=secure-password-here
 
@@ -700,6 +781,23 @@ AUTH_COOKIE_SECURE=true          # Secure cookie flag
 AUTH_RATE_LIMIT_ENABLED=true     # Enable rate limiting
 AUTH_RATE_LIMIT_STRICT=false     # Always enforce (even behind proxy)
 ```
+
+> ⚠️ **Authentication Required**: Control UI authentication is **mandatory**. The gateway will refuse to start if authentication is not configured.
+>
+> | Scenario                                       | Result                                        |
+> | ---------------------------------------------- | --------------------------------------------- |
+> | Both `AUTH_EMAIL` and `AUTH_PASSWORD` set      | ✅ Control UI authentication enabled          |
+> | Either `AUTH_EMAIL` or `AUTH_PASSWORD` missing | ❌ **Fatal Error** - Gateway refuses to start |
+>
+> **Error Message:**
+>
+> ```
+> Control UI authentication is required.
+> Please set both AUTH_EMAIL and AUTH_PASSWORD environment variables.
+> Example: AUTH_EMAIL=admin@example.com AUTH_PASSWORD=yourpassword
+> ```
+>
+> **Why mandatory?** Ensures the Control UI is always protected. No accidental unprotected deployments.
 
 ### Session Store
 
@@ -962,10 +1060,10 @@ if (response.status === 401) {
 
 ## Security Considerations
 
-### 1. HTTPS Required
+### 1. HTTPS and Cookie Secure Flag
 
-- Authentication only works over HTTPS (except localhost development)
-- `AUTH_COOKIE_SECURE=true` enforces this
+- In production use HTTPS and keep `AUTH_COOKIE_SECURE=true` (default) so the refresh cookie is only sent over secure connections.
+- For local development over HTTP (e.g. `http://localhost:51442`), set `AUTH_COOKIE_SECURE=false` so the browser will store and send the refresh cookie; otherwise refresh requests return 401 after login.
 
 ### 2. Brute Force Protection
 
@@ -992,6 +1090,28 @@ if (response.status === 401) {
 ---
 
 ## Configuration Examples
+
+### Validation Examples
+
+#### ✅ Valid: Both authentication variables set
+
+```bash
+export AUTH_EMAIL="admin@example.com"
+export AUTH_PASSWORD="secure-password"
+openclaw gateway run
+# Output: [auth] Control UI authentication enabled
+```
+
+#### ❌ Invalid: Missing AUTH_EMAIL or AUTH_PASSWORD (Fatal Error)
+
+```bash
+# Missing authentication configuration
+openclaw gateway run
+# ERROR: Gateway fails to start
+# Control UI authentication is required.
+# Please set both AUTH_EMAIL and AUTH_PASSWORD environment variables.
+# Example: AUTH_EMAIL=admin@example.com AUTH_PASSWORD=yourpassword
+```
 
 ### Minimal Setup
 

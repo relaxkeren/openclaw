@@ -48,6 +48,7 @@ export type GatewayBrowserClientOptions = {
   url: string;
   token?: string;
   password?: string;
+  getAccessToken?: () => string | null;
   clientName?: GatewayClientName;
   clientVersion?: string;
   platform?: string;
@@ -57,6 +58,7 @@ export type GatewayBrowserClientOptions = {
   onEvent?: (evt: GatewayEventFrame) => void;
   onClose?: (info: { code: number; reason: string }) => void;
   onGap?: (info: { expected: number; received: number }) => void;
+  onAuthError?: () => void;
 };
 
 // 4008 = application-defined code (browser rejects 1008 "Policy Violation")
@@ -144,7 +146,10 @@ export class GatewayBrowserClient {
     const role = "operator";
     let deviceIdentity: Awaited<ReturnType<typeof loadOrCreateDeviceIdentity>> | null = null;
     let canFallbackToShared = false;
-    let authToken = this.opts.token;
+
+    // Try JWT token from auth context first, then fall back to legacy token
+    const jwtToken = this.opts.getAccessToken?.();
+    let authToken = jwtToken ?? this.opts.token;
 
     if (isSecureContext) {
       deviceIdentity = await loadOrCreateDeviceIdentity();
@@ -152,7 +157,7 @@ export class GatewayBrowserClient {
         deviceId: deviceIdentity.deviceId,
         role,
       })?.token;
-      authToken = storedToken ?? this.opts.token;
+      authToken = jwtToken ?? storedToken ?? this.opts.token;
       canFallbackToShared = Boolean(storedToken && this.opts.token);
     }
     const auth =
@@ -280,7 +285,12 @@ export class GatewayBrowserClient {
       if (res.ok) {
         pending.resolve(res.payload);
       } else {
-        pending.reject(new Error(res.error?.message ?? "request failed"));
+        // Check for auth errors
+        const errorMessage = res.error?.message ?? "request failed";
+        if (errorMessage.includes("Token expired") || errorMessage.includes("unauthorized")) {
+          this.opts.onAuthError?.();
+        }
+        pending.reject(new Error(errorMessage));
       }
       return;
     }

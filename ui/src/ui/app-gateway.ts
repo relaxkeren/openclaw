@@ -13,6 +13,7 @@ import {
   setLastActiveSessionKey,
 } from "./app-settings.ts";
 import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
+import { getAccessToken, logout, refreshToken } from "./auth/auth-context.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
@@ -30,7 +31,6 @@ import { GatewayBrowserClient } from "./gateway.ts";
 
 type GatewayHost = {
   settings: UiSettings;
-  password: string;
   client: GatewayBrowserClient | null;
   connected: boolean;
   hello: GatewayHelloOk | null;
@@ -125,8 +125,7 @@ export function connectGateway(host: GatewayHost) {
   host.client?.stop();
   host.client = new GatewayBrowserClient({
     url: host.settings.gatewayUrl,
-    token: host.settings.token.trim() ? host.settings.token : undefined,
-    password: host.password.trim() ? host.password : undefined,
+    getAccessToken: () => getAccessToken(),
     clientName: "openclaw-control-ui",
     mode: "webchat",
     onHello: (hello) => {
@@ -156,6 +155,15 @@ export function connectGateway(host: GatewayHost) {
     onEvent: (evt) => handleGatewayEvent(host, evt),
     onGap: ({ expected, received }) => {
       host.lastError = `event gap detected (expected seq ${expected}, got ${received}); refresh recommended`;
+    },
+    onAuthError: () => {
+      // Token expired - try to refresh, or logout
+      void refreshToken().then((success) => {
+        if (!success) {
+          // Refresh failed, logout
+          void logout();
+        }
+      });
     },
   });
   host.client.start();
