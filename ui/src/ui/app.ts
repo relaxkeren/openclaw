@@ -8,7 +8,6 @@ import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
-import type { Tab } from "./navigation.ts";
 import type { ResolvedTheme, ThemeMode } from "./theme.ts";
 import type {
   AgentsListResult,
@@ -80,6 +79,7 @@ import {
 import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
 import { authState, initAuth, login, clearError, subscribeAuthState } from "./auth/auth-context.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
+import { pathForTab, type Tab } from "./navigation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
 import { renderLogin } from "./views/login.ts";
@@ -363,10 +363,14 @@ export class OpenClawApp extends LitElement {
   protected async firstUpdated() {
     handleFirstUpdated(this as unknown as Parameters<typeof handleFirstUpdated>[0]);
 
-    // Initialize auth - check for existing session
+    // Initialize auth - check for existing session (e.g. refresh from cookie)
     await initAuth();
 
-    // Subscribe to auth state changes
+    // Sync and re-render: auth may have changed during initAuth but we weren't subscribed yet
+    this.auth = { ...authState };
+    this.requestUpdate();
+
+    // Subscribe to auth state changes from here on
     this._authUnsubscribe = subscribeAuthState(() => {
       this.auth = { ...authState };
       this.requestUpdate();
@@ -602,13 +606,11 @@ export class OpenClawApp extends LitElement {
         onSubmit: async () => {
           const success = await login(this.loginEmail, this.loginPassword);
           if (success) {
-            // Clear login form
+            // Clear login form and go to home (default tab)
             this.loginEmail = "";
             this.loginPassword = "";
-            // Get redirect URL or go to default
-            const params = new URLSearchParams(window.location.search);
-            const redirect = params.get("redirect") || "/";
-            window.history.replaceState({}, "", redirect);
+            const homePath = pathForTab("chat", this.basePath);
+            window.history.replaceState({}, "", homePath);
             // Connect to gateway
             this.connect();
           }

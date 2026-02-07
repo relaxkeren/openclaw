@@ -288,13 +288,10 @@ export function handleControlUiHttpRequest(
       const authContext = buildAuthContext(req);
 
       if (!authContext.isAuthenticated) {
-        // Redirect to login page
+        // Redirect to login page (always; no redirect param for simplicity)
         applyControlUiSecurityHeaders(res);
         res.statusCode = 302;
-        res.setHeader(
-          "Location",
-          `${basePath || ""}/login?redirect=${encodeURIComponent(pathname)}`,
-        );
+        res.setHeader("Location", `${basePath || ""}/login`);
         res.end();
         return true;
       }
@@ -331,8 +328,41 @@ export function handleControlUiHttpRequest(
 
   applyControlUiSecurityHeaders(res);
 
-  // Handle login page route
+  // Handle login page route: serve static assets under /login/ as files, not index.html
   if (pathname === "/login" || pathname.startsWith("/login/")) {
+    const loginPrefix = "/login";
+    const isAssetUnderLogin =
+      pathname.startsWith(`${loginPrefix}/assets/`) ||
+      /\.(js|css|ico|map|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|txt)(\?|$)/i.test(pathname);
+
+    if (isAssetUnderLogin && pathname.length > loginPrefix.length) {
+      const rootState = opts?.root;
+      const root =
+        rootState?.kind === "resolved"
+          ? rootState.path
+          : rootState?.kind === "invalid" || rootState?.kind === "missing"
+            ? undefined
+            : resolveControlUiRootSync({
+                moduleUrl: import.meta.url,
+                argv1: process.argv[1],
+                cwd: process.cwd(),
+              });
+      if (root) {
+        const fileRel = pathname.slice(loginPrefix.length).replace(/^\//, "");
+        if (fileRel && isSafeRelativePath(fileRel)) {
+          const filePath = path.join(root, fileRel);
+          if (
+            filePath.startsWith(root) &&
+            fs.existsSync(filePath) &&
+            fs.statSync(filePath).isFile()
+          ) {
+            serveFile(res, filePath);
+            return true;
+          }
+        }
+      }
+    }
+
     const rootState = opts?.root;
     const root =
       rootState?.kind === "resolved"
@@ -344,7 +374,6 @@ export function handleControlUiHttpRequest(
           });
 
     if (root) {
-      // Serve index.html for login page - the frontend will handle showing login UI
       const indexPath = path.join(root, "index.html");
       if (fs.existsSync(indexPath)) {
         serveIndexHtml(res, indexPath, {

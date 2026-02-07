@@ -302,7 +302,13 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
   }
-  const resolved = tabFromPath(window.location.pathname, host.basePath) ?? "chat";
+  const pathname = window.location.pathname;
+  // On login page, set tab for rendering but do not rewrite URL (stay on /login)
+  if (pathname === "/login" || pathname.endsWith("/login") || pathname.includes("/login/")) {
+    setTabFromRoute(host, "chat");
+    return;
+  }
+  const resolved = tabFromPath(pathname, host.basePath) ?? "chat";
   setTabFromRoute(host, resolved);
   syncUrlWithTab(host, resolved, replace);
 }
