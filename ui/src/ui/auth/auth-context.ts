@@ -1,5 +1,12 @@
-import type { AuthState, AuthContextType, AuthError } from "./types.js";
+import type { AuthSyncMessage } from "./auth-sync.js";
+import type { AuthState, AuthContextType } from "./types.js";
 import { loginApi, refreshTokenApi, logoutApi, getCurrentUserApi } from "./auth-service.js";
+import {
+  subscribeToAuthSync,
+  broadcastLogin,
+  broadcastLogout,
+  broadcastTokenRefresh,
+} from "./auth-sync.js";
 import {
   createTokenRefreshScheduler,
   setupVisibilityRefresh,
@@ -60,11 +67,62 @@ setGlobalScheduler(scheduler);
 
 // Visibility refresh cleanup
 let visibilityCleanup: (() => void) | null = null;
+let authSyncUnsubscribe: (() => void) | null = null;
+
+function applySyncMessage(msg: AuthSyncMessage): void {
+  if (msg.type === "LOGIN" && msg.payload?.accessToken && msg.payload?.expiresAt) {
+    authState.accessToken = msg.payload.accessToken;
+    authState.expiresAt = msg.payload.expiresAt;
+    authState.isAuthenticated = true;
+    authState.error = null;
+    scheduler.schedule(msg.payload.expiresAt);
+    if (visibilityCleanup) {
+      visibilityCleanup();
+    }
+    visibilityCleanup = setupVisibilityRefresh(() => {
+      if (authState.expiresAt && authState.expiresAt - Date.now() < 2 * 60 * 1000) {
+        void refreshToken();
+      }
+    });
+    void getCurrentUserApi(msg.payload.accessToken).then((userResult) => {
+      if (!("code" in userResult)) {
+        authState.user = userResult;
+        notifyListeners();
+      }
+    });
+    notifyListeners();
+    return;
+  }
+  if (msg.type === "TOKEN_REFRESH" && msg.payload?.accessToken && msg.payload?.expiresAt) {
+    authState.accessToken = msg.payload.accessToken;
+    authState.expiresAt = msg.payload.expiresAt;
+    scheduler.schedule(msg.payload.expiresAt);
+    notifyListeners();
+    return;
+  }
+  if (msg.type === "LOGIN" || msg.type === "TOKEN_REFRESH") {
+    // Storage fallback: no payload; refresh to get token
+    void refreshToken();
+    return;
+  }
+  if (msg.type === "LOGOUT") {
+    clearAuthState();
+    if (visibilityCleanup) {
+      visibilityCleanup();
+      visibilityCleanup = null;
+    }
+    notifyListeners();
+  }
+}
 
 // Initialize auth state from session (if user has valid refresh token)
 export async function initAuth(): Promise<void> {
   authState.isLoading = true;
   notifyListeners();
+
+  if (!authSyncUnsubscribe) {
+    authSyncUnsubscribe = subscribeToAuthSync((msg) => applySyncMessage(msg));
+  }
 
   try {
     // Try to refresh token - if successful, user was previously logged in
@@ -128,6 +186,8 @@ export async function login(email: string, password: string): Promise<boolean> {
     // Schedule token refresh
     scheduler.schedule(result.expiresAt);
 
+    broadcastLogin(result.accessToken, result.expiresAt);
+
     authState.isLoading = false;
     notifyListeners();
     return true;
@@ -176,6 +236,8 @@ export async function refreshToken(): Promise<boolean> {
     // Schedule next refresh
     scheduler.schedule(result.expiresAt);
 
+    broadcastTokenRefresh(result.accessToken, result.expiresAt);
+
     notifyListeners();
     return true;
   } catch (error) {
@@ -188,6 +250,8 @@ export async function refreshToken(): Promise<boolean> {
 export async function logout(): Promise<void> {
   // Call logout API to invalidate refresh token
   await logoutApi();
+
+  broadcastLogout();
 
   // Clear local state
   clearAuthState();

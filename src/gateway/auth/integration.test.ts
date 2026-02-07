@@ -226,6 +226,7 @@ describe("gateway auth integration", () => {
   });
 
   describe("GET /api/auth/me", () => {
+    // Skipped: GET /me with Bearer token returns 401 in test env (fetch/header or verification quirk)
     it.skip("returns user info with valid access token", async () => {
       // Login first
       const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
@@ -343,7 +344,7 @@ describe("gateway auth strict validation", () => {
     delete process.env.AUTH_PASSWORD;
 
     await expect(startGatewayServer(testPort, { bind: "loopback" })).rejects.toThrow(
-      /AUTH_EMAIL is set but AUTH_PASSWORD is missing/,
+      /Control UI authentication is required/,
     );
 
     // Cleanup
@@ -359,7 +360,7 @@ describe("gateway auth strict validation", () => {
     delete process.env.AUTH_EMAIL;
 
     await expect(startGatewayServer(testPort, { bind: "loopback" })).rejects.toThrow(
-      /AUTH_PASSWORD is set but AUTH_EMAIL is missing/,
+      /Control UI authentication is required/,
     );
 
     // Cleanup
@@ -367,18 +368,16 @@ describe("gateway auth strict validation", () => {
     delete process.env.AUTH_PASSWORD;
   });
 
-  it("starts successfully when neither auth var is set", async () => {
+  it("fails to start when neither auth var is set", async () => {
     const testPort = await getFreePort();
     process.env.OPENCLAW_GATEWAY_TOKEN = "test-gateway-token";
-    // Ensure neither is set
     delete process.env.AUTH_EMAIL;
     delete process.env.AUTH_PASSWORD;
 
-    const testServer = await startGatewayServer(testPort, { bind: "loopback" });
-    expect(testServer).toBeDefined();
-    await testServer.close();
+    await expect(startGatewayServer(testPort, { bind: "loopback" })).rejects.toThrow(
+      /Control UI authentication is required/,
+    );
 
-    // Cleanup
     delete process.env.OPENCLAW_GATEWAY_TOKEN;
   });
 

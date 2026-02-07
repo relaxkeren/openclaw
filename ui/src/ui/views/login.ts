@@ -40,12 +40,13 @@ export function renderLogin(props: LoginProps) {
   };
 
   return html`
-    <div class="login-container">
-      <div class="login-card">
-        <div class="login-header">
-          <h1>OpenClaw</h1>
-          <p class="subtitle">Control UI</p>
-        </div>
+    <div class="login-screen">
+      <div class="login-container">
+        <div class="login-card">
+          <div class="login-header">
+            <h1>OpenClaw</h1>
+            <p class="subtitle">Control UI</p>
+          </div>
 
         <form @submit=${handleSubmit} class="login-form">
           ${
@@ -119,27 +120,32 @@ export function renderLogin(props: LoginProps) {
             }
           </button>
         </form>
+        </div>
       </div>
     </div>
 
     <style>
+      .login-screen {
+        position: fixed;
+        inset: 0;
+        min-height: 100vh;
+        overflow: auto;
+        background: linear-gradient(160deg, var(--login-bg-start, #1a1a2e) 0%, var(--login-bg-mid, #16213e) 50%, var(--login-bg-end, #0f3460) 100%);
+      }
       .login-container {
         display: flex;
         align-items: center;
         justify-content: center;
         min-height: 100vh;
-        padding: 20px;
-        background: var(--bg-secondary, #f5f5f5);
+        padding: 24px;
       }
-
       .login-card {
         width: 100%;
         max-width: 400px;
         padding: 40px;
-        background: var(--bg-primary, #ffffff);
-        border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
-          0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        background: var(--bg-primary, rgba(255, 255, 255, 0.96));
+        border-radius: 16px;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
       }
 
       .login-header {

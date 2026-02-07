@@ -36,7 +36,6 @@ import { resolveTheme, type ResolvedTheme, type ThemeMode } from "./theme.ts";
 
 type SettingsHost = {
   settings: UiSettings;
-  password?: string;
   theme: ThemeMode;
   themeResolved: ResolvedTheme;
   applySessionKey: string;
@@ -92,17 +91,14 @@ export function applySettingsFromUrl(host: SettingsHost) {
   const gatewayUrlRaw = params.get("gatewayUrl");
   let shouldCleanUrl = false;
 
-  if (tokenRaw != null) {
-    params.delete("token");
-    shouldCleanUrl = true;
-  }
-
-  if (passwordRaw != null) {
-    const password = passwordRaw.trim();
-    if (password) {
-      (host as { password: string }).password = password;
+  // Strip token/password from URL so they are not stored in history (values are not used; JWT auth only)
+  if (tokenRaw != null || passwordRaw != null) {
+    if (tokenRaw != null) {
+      params.delete("token");
     }
-    params.delete("password");
+    if (passwordRaw != null) {
+      params.delete("password");
+    }
     shouldCleanUrl = true;
   }
 

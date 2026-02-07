@@ -1,7 +1,7 @@
 import type { TokenRefreshScheduler } from "./types.js";
 
-// Refresh 60 seconds before expiry
-const REFRESH_BUFFER_MS = 60 * 1000;
+// Refresh 5 minutes before expiry
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 let refreshCallback: (() => Promise<boolean>) | null = null;
 let scheduledTimeout: ReturnType<typeof setTimeout> | null = null;

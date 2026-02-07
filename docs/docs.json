@@ -1062,6 +1062,7 @@
                     "pages": [
                       "gateway/configuration",
                       "gateway/configuration-examples",
+                      "configuration/auth",
                       "gateway/authentication",
                       "gateway/health",
                       "gateway/heartbeat",

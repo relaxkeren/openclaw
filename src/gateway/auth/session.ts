@@ -11,7 +11,7 @@ import type {
 // In-memory session store
 const sessions = new Map<string, AuthSession>();
 
-// Track access token JTI to session mapping (for revocation)
+// Track access token JTI to session (by refreshToken key) for revocation lookup
 const accessTokenJtiToSession = new Map<string, string>();
 
 let config: AuthConfig | null = null;
@@ -147,14 +147,11 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
       return null;
     }
 
-    // Check if token has been revoked
-    if (accessTokenJtiToSession.has(payload.jti)) {
-      const sessionId = accessTokenJtiToSession.get(payload.jti);
-      const session = sessionId ? sessions.get(sessionId) : undefined;
-      if (!session) {
-        // Session was deleted, token is revoked
-        return null;
-      }
+    // Check if token has been revoked (session was deleted)
+    const refreshTokenKey = accessTokenJtiToSession.get(payload.jti);
+    const session = refreshTokenKey ? sessions.get(refreshTokenKey) : undefined;
+    if (accessTokenJtiToSession.has(payload.jti) && !session) {
+      return null;
     }
 
     return payload;
@@ -173,13 +170,18 @@ export function createSession(
   email: string,
   ipAddress?: string,
   userAgent?: string,
-): { session: AuthSession; accessToken: string; refreshToken: string } {
+): {
+  session: AuthSession;
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAtMs: number;
+} {
   if (!config) {
     throw new Error("Auth not initialized");
   }
 
   const refreshToken = generateRefreshToken();
-  const { token: accessToken, jti } = generateAccessToken(email);
+  const { token: accessToken, jti, _expiresAt } = generateAccessToken(email);
   const now = Date.now();
 
   const session: AuthSession = {
@@ -195,9 +197,14 @@ export function createSession(
   };
 
   sessions.set(refreshToken, session);
-  accessTokenJtiToSession.set(jti, session.id);
+  accessTokenJtiToSession.set(jti, refreshToken);
 
-  return { session, accessToken, refreshToken };
+  return {
+    session,
+    accessToken,
+    refreshToken,
+    accessTokenExpiresAtMs: _expiresAt * 1000,
+  };
 }
 
 // Refresh session with new tokens
@@ -205,7 +212,12 @@ export function refreshSession(
   refreshToken: string,
   ipAddress?: string,
   userAgent?: string,
-): { session: AuthSession; accessToken: string; newRefreshToken: string } | null {
+): {
+  session: AuthSession;
+  accessToken: string;
+  newRefreshToken: string;
+  accessTokenExpiresAtMs: number;
+} | null {
   if (!config) {
     return null;
   }
@@ -228,7 +240,7 @@ export function refreshSession(
 
   // Create new tokens (token rotation)
   const newRefreshToken = generateRefreshToken();
-  const { token: accessToken, jti } = generateAccessToken(session.email);
+  const { token: accessToken, jti, _expiresAt } = generateAccessToken(session.email);
   const now = Date.now();
 
   const newSession: AuthSession = {
@@ -244,9 +256,14 @@ export function refreshSession(
   };
 
   sessions.set(newRefreshToken, newSession);
-  accessTokenJtiToSession.set(jti, newSession.id);
+  accessTokenJtiToSession.set(jti, newRefreshToken);
 
-  return { session: newSession, accessToken, newRefreshToken };
+  return {
+    session: newSession,
+    accessToken,
+    newRefreshToken,
+    accessTokenExpiresAtMs: _expiresAt * 1000,
+  };
 }
 
 // Revoke a session
@@ -321,13 +338,17 @@ export function login(
     };
   }
 
-  const { session, accessToken, refreshToken } = createSession(email, ipAddress, userAgent);
+  const { session, accessToken, refreshToken, accessTokenExpiresAtMs } = createSession(
+    email,
+    ipAddress,
+    userAgent,
+  );
 
   return {
     success: true,
     response: {
       accessToken,
-      expiresAt: session.refreshTokenExpiresAt,
+      expiresAt: accessTokenExpiresAtMs,
     },
     refreshToken,
   };
@@ -355,13 +376,13 @@ export function refresh(
     };
   }
 
-  const { session, accessToken, newRefreshToken } = result;
+  const { session, accessToken, newRefreshToken, accessTokenExpiresAtMs } = result;
 
   return {
     success: true,
     response: {
       accessToken,
-      expiresAt: session.refreshTokenExpiresAt,
+      expiresAt: accessTokenExpiresAtMs,
     },
     newRefreshToken,
   };

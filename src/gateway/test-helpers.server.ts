@@ -94,9 +94,9 @@ async function setupGatewayTestHome() {
   process.env.USERPROFILE = tempHome;
   process.env.OPENCLAW_STATE_DIR = path.join(tempHome, ".openclaw");
   delete process.env.OPENCLAW_CONFIG_PATH;
-  // Clear auth env vars to prevent strict validation errors in unrelated tests
-  delete process.env.AUTH_EMAIL;
-  delete process.env.AUTH_PASSWORD;
+  // Set default auth so gateway can start (mandatory auth). Tests that assert missing auth override these.
+  process.env.AUTH_EMAIL = previousAuthEmail ?? "test@example.com";
+  process.env.AUTH_PASSWORD = previousAuthPassword ?? "test-password";
 }
 
 function applyGatewaySkipEnv() {

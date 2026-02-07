@@ -214,7 +214,6 @@ export function renderApp(state: AppViewState) {
                 connected: state.connected,
                 hello: state.hello,
                 settings: state.settings,
-                password: state.password,
                 lastError: state.lastError,
                 presenceCount,
                 sessionsCount,
@@ -222,7 +221,6 @@ export function renderApp(state: AppViewState) {
                 cronNext,
                 lastChannelsRefresh: state.channelsLastSuccess,
                 onSettingsChange: (next) => state.applySettings(next),
-                onPasswordChange: (next) => (state.password = next),
                 onSessionKeyChange: (next) => {
                   state.sessionKey = next;
                   state.chatMessage = "";

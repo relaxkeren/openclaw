@@ -78,15 +78,7 @@ import {
   type CompactionStatus,
 } from "./app-tool-stream.ts";
 import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
-import {
-  authState,
-  initAuth,
-  login,
-  logout,
-  clearError,
-  useAuth,
-  subscribeAuthState,
-} from "./auth/auth-context.ts";
+import { authState, initAuth, login, clearError, subscribeAuthState } from "./auth/auth-context.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
@@ -116,7 +108,6 @@ function resolveOnboardingMode(): boolean {
 @customElement("openclaw-app")
 export class OpenClawApp extends LitElement {
   @state() settings: UiSettings = loadSettings();
-  @state() password = "";
   @state() tab: Tab = "chat";
   @state() onboarding = resolveOnboardingMode();
   @state() connected = false;
@@ -628,10 +619,52 @@ export class OpenClawApp extends LitElement {
       });
     }
 
-    // Show loading state while auth is initializing
+    // Show full-screen loading state while auth is initializing
     if (this.auth.isLoading) {
       return html`
-        <div class="loading-screen">Loading...</div>
+        <div class="auth-loading-screen">
+          <div class="auth-loading-content">
+            <div class="auth-loading-spinner"></div>
+            <p class="auth-loading-text">Checking authentication...</p>
+          </div>
+        </div>
+        <style>
+          .auth-loading-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(
+              135deg,
+              var(--bg-secondary, #1a1a2e) 0%,
+              var(--bg-primary, #16213e) 100%
+            );
+            color: var(--text-primary, #e8e8e8);
+          }
+          .auth-loading-content {
+            text-align: center;
+          }
+          .auth-loading-spinner {
+            width: 32px;
+            height: 32px;
+            margin: 0 auto 16px;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: auth-spin 0.8s linear infinite;
+          }
+          .auth-loading-text {
+            margin: 0;
+            font-size: 16px;
+            opacity: 0.9;
+          }
+          @keyframes auth-spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        </style>
       `;
     }
 

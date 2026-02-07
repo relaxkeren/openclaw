@@ -17,7 +17,6 @@ import {
   syncTabWithLocation,
   syncThemeWithSettings,
 } from "./app-settings.ts";
-import { initAuth } from "./auth/auth-context.ts";
 
 type LifecycleHost = {
   basePath: string;

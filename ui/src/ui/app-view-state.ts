@@ -37,7 +37,6 @@ import type { SessionLogEntry } from "./views/usage.ts";
 
 export type AppViewState = {
   settings: UiSettings;
-  password: string;
   tab: Tab;
   onboarding: boolean;
   basePath: string;
