@@ -2,46 +2,57 @@
 
 ## Overview
 
-This document tracks the implementation of the Split Token Pattern authentication system for the OpenClaw Control UI.
+This document tracks the implementation of **Unified JWT Authentication** for the OpenClaw Control UI. The JWT access token serves dual purposes: Control UI session management and WebSocket/API authentication.
 
-**Goal**: Add email/password authentication using the Split Token Pattern (JWT access token + httpOnly refresh token cookie) to protect the Control UI.
+**Goal**: Implement mandatory email/password authentication with a unified JWT token system that provides secure session management and seamless WebSocket authentication.
 
-**Current Status**: ✅ **Implementation Complete** - All core features implemented and tested. Production ready.
+**Current Status**: 🚧 **Core Implementation Complete** - WebSocket auth fixed, ready for manual testing. Remaining: UI polish, cross-tab sync, test fixes.
 
 ### Quick Summary
 
-| Component              | Status                                               | Tests              |
-| ---------------------- | ---------------------------------------------------- | ------------------ |
-| Backend Auth Module    | ✅ Complete                                          | 46 passing         |
-| Gateway Integration    | ✅ Complete                                          | -                  |
-| Frontend Auth Layer    | ✅ Complete                                          | Integration tested |
-| TypeScript Compilation | ✅ Clean                                             | No errors          |
-| Integration Tests      | ✅ Complete                                          | 20 passing         |
-| Strict Validation      | ✅ Complete                                          | 4 passing          |
-| Documentation          | ✅ Complete (auth docs) / ⏳ Pending (separate docs) | Tasks 22-23        |
+| Component              | Status           | Tests                           |
+| ---------------------- | ---------------- | ------------------------------- |
+| Backend Auth Module    | ✅ Complete      | 46 passing                      |
+| Gateway Integration    | ✅ Complete      | -                               |
+| Frontend Auth Layer    | ✅ Core Complete | Login, JWT, session working     |
+| WebSocket Auth         | ✅ Fixed         | JWT-only validation implemented |
+| TypeScript Compilation | ✅ Clean         | No errors                       |
+| Integration Tests      | ✅ Complete      | 20 passing                      |
+| Unified JWT Auth       | ✅ Complete      | Backend + WebSocket working     |
+| Cross-Tab Sync         | ⏳ Pending       | Not implemented                 |
+| UI Polish              | ⏳ Pending       | Needs full-screen styling       |
+| Test Fixes             | ⏳ Pending       | Tests broken, need fixing       |
+| Documentation          | ✅ Complete      | Design docs updated             |
 
-**Total Test Coverage**: 66 tests passing, 1 skipped
+**Key Changes**:
 
-### Mandatory Authentication Behavior
+- JWT access token = Gateway token (unified)
+- Full-screen login page (only UI shown when not authenticated)
+- Token refresh 5 min before expiry
+- Cross-tab synchronization
+- No localStorage storage (memory only)
+
+### Mandatory Authentication
 
 | Scenario                                  | Result                                        |
 | ----------------------------------------- | --------------------------------------------- |
-| Both `AUTH_EMAIL` and `AUTH_PASSWORD` set | ✅ Control UI authentication enabled          |
+| Both `AUTH_EMAIL` and `AUTH_PASSWORD` set | ✅ Gateway starts with auth enabled           |
 | Either or both missing                    | ❌ **Fatal Error** - Gateway refuses to start |
-
-**Breaking Change**: Authentication is now mandatory. The gateway will not start without both AUTH_EMAIL and AUTH_PASSWORD configured.
 
 ### Usage
 
 ```bash
-# Enable authentication
+# Set required authentication
 export AUTH_EMAIL="admin@example.com"
 export AUTH_PASSWORD="your-secure-password"
 export AUTH_COOKIE_SECURE=false  # For HTTP localhost
-pnpm dev
+
+# Run gateway
+pnpm openclaw gateway
 
 # Access Control UI at http://localhost:18789
-# Login with configured credentials
+# - First visit: Full-screen login page
+# - After login: Full app with WebSocket connection
 ```
 
 ---
@@ -49,27 +60,61 @@ pnpm dev
 ## Architecture Summary
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Control UI SPA                           │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Auth Layer (ui/src/ui/auth/)                          │   │
-│  │  - Token Manager: Auto-refresh 60s before expiry       │   │
-│  │  - Auth Context: Reactive state management             │   │
-│  │  - Auth Service: API calls to backend                  │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼ HTTP / WebSocket
-┌─────────────────────────────────────────────────────────────────┐
-│                         Gateway Server                          │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Auth Module (src/gateway/auth/)                       │   │
-│  │  - Session Store: In-memory Map                        │   │
-│  │  - JWT: HS256, 15min access / 7day refresh             │   │
-│  │  - Rate Limit: 5 login attempts per 5min               │   │
-│  │  - Routes: /api/auth/{login,refresh,logout,me}        │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Unified JWT Authentication                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+CONTROL UI SPA:
+┌─────────────────────────────────────────────────────────────────────────┐
+│  NOT AUTHENTICATED:                                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    Full-Screen Login                             │   │
+│  │  ┌─────────────────────────────────────────────────────────┐   │   │
+│  │  │              Background Image / Gradient                 │   │   │
+│  │  │                                                          │   │   │
+│  │  │         "Checking authentication..."                    │   │   │
+│  │  │  (While validating session on page load)                │   │   │
+│  │  │                                                          │   │   │
+│  │  │         [Or login form when no session]                 │   │   │
+│  │  │         📧 Email: [________________]                    │   │   │
+│  │  │         🔒 Password: [________________]                 │   │   │
+│  │  │                                                          │   │   │
+│  │  │         [      Sign In      ]                           │   │   │
+│  │  │                                                          │   │   │
+│  │  │         [Error messages display here]                   │   │   │
+│  │  └─────────────────────────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  AUTHENTICATED:                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                        Full App                                  │   │
+│  │  - Sidebar, Chat, Settings, etc.                                │   │
+│  │  - WebSocket connected with JWT                                 │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  Auth State:                                                            │
+│  - JWT in memory only (never localStorage)                            │   │
+│  - Refresh cookie (HttpOnly) for silent re-auth                       │   │
+│  - Refresh 5 min before JWT expiry                                    │   │
+│  - Cross-tab sync via BroadcastChannel                                │   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ HTTP / WebSocket (Same JWT)
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Gateway Server                                  │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  Unified Auth Layer (JWT Only)                                     ││
+│  │  - No separate gateway token - JWT serves both purposes           ││
+│  │  - HTTP: Bearer token in Authorization header                     ││
+│  │  - WebSocket: JWT in connect.auth.token                          ││
+│  │  - Same validation logic for both                                 ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  Session Store (in-memory)                                         ││
+│  │  Map<refreshToken, { email, accessTokenJti, expiresAt }>          ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -1187,6 +1232,18 @@ See [Authentication Documentation](https://docs.openclaw.ai/configuration/auth) 
 
 ## 📝 CHANGE LOG
 
+### 2025-02-07 - WebSocket Auth Fixed ✅
+
+- ✅ **Fixed WebSocket authentication flow**
+- Modified: `src/gateway/server/ws-connection/message-handler.ts`
+- When session auth enabled: Only JWT token is validated (legacy gateway token check skipped)
+- User-friendly error messages:
+  - Missing JWT: "Authentication required. Please log in."
+  - Invalid JWT: "Session expired. Please log in again."
+- Console logs technical details for debugging
+- TypeScript compilation passes
+- Ready for manual testing
+
 ### 2025-02-07 - BREAKING CHANGE: Mandatory Authentication ✅
 
 - ⚠️ **BREAKING CHANGE**: Authentication is now **mandatory**
@@ -1236,34 +1293,302 @@ See [Authentication Documentation](https://docs.openclaw.ai/configuration/auth) 
 
 ### Completed ✅
 
-1. [x] **Task 16**: Gateway Server Initialization - ✅ Added auth init to `src/gateway/server.impl.ts`
-2. [x] **Task 18**: TypeScript Compilation - ✅ `pnpm tsgo` passes cleanly
-3. [x] **Task 19**: Unit Tests - ✅ 46 tests passing (session + rate-limit)
-4. [x] **Task 20**: Integration Tests - ✅ 16 tests passing
-5. [x] Manual testing - ✅ Tested with env vars
+#### Phase 1: Foundation (COMPLETE)
 
-### Mandatory Authentication (High Priority - IN PROGRESS ⚠️)
+1. [x] **Backend Auth Module** - Session management, JWT generation, rate limiting
+2. [x] **HTTP Auth Routes** - `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`
+3. [x] **Mandatory Auth** - Gateway refuses to start without AUTH_EMAIL/PASSWORD
+4. [x] **Frontend Auth Layer** - Auth context, login UI, token manager
+5. [x] **Basic Integration** - Login page shows when not authenticated
 
-**Status**: Code implemented, tests broken 11. [x] **Task 29**: Code Changes - ✅ Made auth mandatory in `server.impl.ts` 12. [x] **Task 30**: Documentation Update - ✅ Updated `knowledge/authentication.md` and `knowledge/auth-impl-plan.md` 13. [ ] **Task 31**: Fix Broken Tests - ⏳ Awaiting instruction to fix all tests that don't set AUTH_EMAIL/AUTH_PASSWORD
+#### Phase 2: Critical Fixes (COMPLETE)
 
-### Documentation (High Priority)
+6. [x] **WebSocket Auth Fix** - JWT-only validation when session auth enabled
+   - Modified: `src/gateway/server/ws-connection/message-handler.ts`
+   - When session auth enabled: Only JWT checked, legacy gateway token skipped
+   - Error messages: "Authentication required" / "Session expired"
+7. [x] **TypeScript Compilation** - All files compile without errors
+8. [x] **Documentation** - Updated `knowledge/authentication.md` with unified JWT design
 
-11. [ ] **Task 22**: Configuration Documentation - Write `docs/configuration/auth.md`
-12. [ ] **Task 23**: README Update - Add auth setup section
+---
 
-### Optional Enhancements (Medium Priority)
+### Remaining Tasks (High Priority)
 
-13. [ ] **Task 21**: Frontend Unit Tests - Optional, can add later if needed
-14. [ ] Security review and penetration testing
-15. [ ] Add bcrypt for password hashing (currently plain text in env vars)
-16. [ ] Add audit logging for auth events
+#### Task 32: Cross-Tab Synchronization ⏳
 
-### Future Enhancements (Low Priority)
+**Status**: Not started
+**Priority**: HIGH
+**Estimated Effort**: 4-6 hours
+**Assigned To**: TBD
 
-12. [ ] Multi-user support (currently single admin only)
-13. [ ] Session binding to IP/user agent
-14. [ ] OAuth/OpenID Connect integration
-15. [ ] LDAP/Active Directory integration
+**Objective**: Synchronize authentication state across multiple browser tabs. When a user logs in/out in one tab, all other tabs should update accordingly.
+
+**Design**:
+
+```typescript
+// Use BroadcastChannel API (primary) with storage event fallback
+interface AuthSyncMessage {
+  type: "LOGIN" | "LOGOUT" | "TOKEN_REFRESH";
+  payload?: {
+    accessToken?: string;
+    expiresAt?: number;
+  };
+}
+
+// Implementation approach:
+// 1. Primary: BroadcastChannel (modern browsers)
+// 2. Fallback: localStorage events (older browsers)
+// 3. On LOGIN received: Update auth state, skip if same tab
+// 4. On LOGOUT received: Clear auth state, show login UI
+// 5. On TOKEN_REFRESH: Update token in memory
+```
+
+**Files to Modify**:
+
+- `ui/src/ui/auth/auth-context.ts` - Add sync channel setup
+- `ui/src/ui/auth/auth-sync.ts` (new file) - Cross-tab communication logic
+
+**Acceptance Criteria**:
+
+- [ ] Login in Tab A → Tab B automatically shows logged-in state
+- [ ] Logout in Tab A → Tab B automatically shows login page
+- [ ] Token refresh in Tab A → Tab B gets updated token
+- [ ] Works in modern browsers (Chrome, Firefox, Safari, Edge)
+- [ ] Graceful degradation for browsers without BroadcastChannel
+
+---
+
+#### Task 33: UI Polish & Full-Screen Login ⏳
+
+**Status**: Partial - Login UI exists but needs full-screen styling
+**Priority**: HIGH
+**Estimated Effort**: 3-4 hours
+**Assigned To**: TBD
+
+**Objective**: Create a polished, full-screen login experience with proper styling and loading states.
+
+**Design Requirements**:
+
+1. **Loading State** (`authState.isLoading`):
+
+   ```
+   Full-screen centered text:
+   "Checking authentication..."
+   Simple animated spinner or dots
+   Background: subtle gradient or solid color
+   ```
+
+2. **Full-Screen Login Page** (`!authState.isAuthenticated`):
+
+   ```
+   ┌─────────────────────────────────────────────────────────┐
+   │                                                         │
+   │           [Background Image / Gradient]                 │
+   │                                                         │
+   │              ┌───────────────────────┐                  │
+   │              │   OpenClaw Logo       │                  │
+   │              │                       │                  │
+   │              │   Control UI          │                  │
+   │              │                       │                  │
+   │              │  📧 Email Input       │                  │
+   │              │  🔒 Password Input    │                  │
+   │              │                       │                  │
+   │              │  [    Sign In    ]    │                  │
+   │              │                       │                  │
+   │              │  [Error Messages]     │                  │
+   │              │  [Rate Limit Timer]   │                  │
+   │              └───────────────────────┘                  │
+   │                                                         │
+   └─────────────────────────────────────────────────────────┘
+   ```
+
+3. **Authenticated State**:
+   - Full app with sidebar, chat, etc.
+   - WebSocket connected
+
+**Files to Modify**:
+
+- `ui/src/ui/views/login.ts` - Add full-screen container, background styling
+- `ui/src/ui/app.ts` - Update loading screen styling
+- `ui/src/styles/login.css` (new or existing) - Full-screen styles
+
+**Acceptance Criteria**:
+
+- [ ] Full-screen login with centered card
+- [ ] Background image or gradient
+- [ ] Loading state shows "Checking authentication..."
+- [ ] Responsive design (works on mobile/desktop)
+- [ ] Smooth transitions between states
+- [ ] No flash of unauthenticated content
+
+---
+
+#### Task 34: Token Refresh Timing Update ⏳
+
+**Status**: Current: 60 seconds before expiry
+**Priority**: MEDIUM
+**Estimated Effort**: 1-2 hours
+**Assigned To**: TBD
+
+**Objective**: Update token refresh to happen 5 minutes before JWT expiry instead of 60 seconds.
+
+**Current Behavior**:
+
+```typescript
+// token-manager.ts
+// Refresh 60 seconds before expiry
+const TIME_BEFORE_EXPIRY_TO_REFRESH = 60 * 1000; // 60 seconds
+```
+
+**Required Change**:
+
+```typescript
+// Refresh 5 minutes before expiry
+const TIME_BEFORE_EXPIRY_TO_REFRESH = 5 * 60 * 1000; // 5 minutes
+```
+
+**Files to Modify**:
+
+- `ui/src/ui/auth/token-manager.ts` - Update refresh timing constant
+
+**Acceptance Criteria**:
+
+- [ ] Token refreshes 5 minutes before expiry
+- [ ] No premature refreshes
+- [ ] No missed refreshes leading to auth errors
+
+---
+
+#### Task 35: Remove Legacy Token Storage ⏳
+
+**Status**: Not started
+**Priority**: MEDIUM
+**Estimated Effort**: 2-3 hours
+**Assigned To**: TBD
+
+**Objective**: Remove all legacy gateway token storage from localStorage and config files since we now use unified JWT authentication.
+
+**Background**: Previously, the gateway token was stored in:
+
+1. localStorage (`localStorage.getItem('gatewayToken')` or similar)
+2. Config file system storage
+3. Settings UI
+
+With unified JWT auth, the JWT is kept in memory only, and refresh uses HttpOnly cookie.
+
+**Files to Check & Modify**:
+
+- `ui/src/ui/storage.ts` - Remove token storage functions
+- `ui/src/ui/app-settings.ts` - Remove token from settings
+- `ui/src/ui/views/overview.ts` - Remove gateway token input field
+- `ui/src/ui/gateway.ts` - Ensure only `getAccessToken()` is used
+
+**Acceptance Criteria**:
+
+- [ ] No token stored in localStorage
+- [ ] No token in config file storage
+- [ ] Gateway token input removed from Settings UI
+- [ ] WebSocket connection uses only JWT from auth context
+- [ ] Manual testing confirms login/logout works correctly
+
+---
+
+#### Task 36: Fix Broken Tests ⏳
+
+**Status**: Not started - awaiting manual verification first
+**Priority**: HIGH (after manual testing)
+**Estimated Effort**: 6-8 hours
+**Assigned To**: TBD
+
+**Objective**: Fix all tests that fail due to mandatory authentication requirement.
+
+**Background**: Since authentication is now mandatory, all tests using `startGatewayServer()` need to set AUTH_EMAIL and AUTH_PASSWORD environment variables.
+
+**Test Files to Update** (incrementally, file by file):
+
+1. `src/gateway/auth/integration.test.ts` - Already sets auth vars ✅
+2. `src/gateway/tools-invoke-http.test.ts` - Needs auth vars
+3. `src/gateway/server.*.test.ts` files - All need auth vars
+4. Any other test using `startGatewayServer()`
+
+**Approach**:
+
+1. Update `test-helpers.server.ts` to set default auth vars
+2. Run tests file by file
+3. Fix individual tests as needed
+4. Verify all tests pass
+
+**Acceptance Criteria**:
+
+- [ ] All existing tests pass
+- [ ] New auth integration tests pass
+- [ ] Test suite runs without errors
+- [ ] Coverage maintained or improved
+
+---
+
+### Documentation Tasks (Medium Priority)
+
+#### Task 37: Configuration Documentation
+
+**File**: `docs/configuration/auth.md` (to be created)
+**Content**:
+
+- Environment variable reference
+- Security best practices
+- Production vs development setup
+- Troubleshooting guide
+
+#### Task 38: README Update
+
+**File**: `README.md`
+**Content**:
+
+- Quick start with authentication
+- Security notice about mandatory auth
+- Link to full documentation
+
+---
+
+### Optional Enhancements (Low Priority)
+
+- Security review and penetration testing
+- Add bcrypt for password hashing
+- Add audit logging for auth events
+- Multi-user support
+- Session binding to IP/user agent
+- OAuth/OpenID Connect integration
+
+---
+
+## Current Implementation Status
+
+### What Works Now ✅
+
+1. Gateway starts only with AUTH_EMAIL/PASSWORD set
+2. HTTP redirects to login page when not authenticated
+3. Login form validates credentials against env vars
+4. JWT issued on successful login (memory only)
+5. Refresh token stored in HttpOnly cookie
+6. WebSocket validates JWT on connection
+7. Login UI appears when auth fails
+8. TypeScript compilation passes
+
+### What's Broken / Incomplete 🚧
+
+1. Cross-tab sync not implemented
+2. Login UI needs full-screen styling
+3. Token refresh timing still at 60s (should be 5min)
+4. Legacy token storage not removed
+5. Tests broken (awaiting fix)
+
+### Next Action Items
+
+1. **Immediate**: Test manually with current implementation
+2. **If working**: Document any issues found
+3. **Then**: Implement Task 32 (Cross-tab sync)
+4. **Then**: Implement Task 33 (UI polish)
+5. **Then**: Fix tests (Task 36)
 
 ---
 
