@@ -12,6 +12,7 @@ This file is an **exhaustive map** of the Markdown knowledge in this repository.
 - [knowledge/overview.md](knowledge/overview.md) — Repository Knowledge Overview (this file)
 - [README.md](README.md) — 🦞 OpenClaw — Personal AI Assistant
 - [ops.md](ops.md) — Ops notes (from-source)
+- [knowledge/local-development.md](knowledge/local-development.md) — Local development setup (init, run from repo)
 - [docs/index.md](docs/index.md) — OpenClaw
 - [docs/start/docs-directory.md](docs/start/docs-directory.md) — Docs directory
 - [docs/start/hubs.md](docs/start/hubs.md) — Docs Hubs
