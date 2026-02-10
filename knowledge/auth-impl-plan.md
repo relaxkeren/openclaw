@@ -1228,6 +1228,11 @@ See [Authentication Documentation](https://docs.openclaw.ai/configuration/auth) 
 
 ## 📝 CHANGE LOG
 
+### 2025-02-07 - Option A (local loopback legacy token) – docs updated
+
+- **Decision:** Option A chosen to fix "Token expired" for CLI/tools when session auth is enabled: allow legacy gateway token/password for WebSocket connections from **local loopback** when the client is **not** Control UI; Control UI remains JWT-only.
+- **Docs updated first (no code change yet):** `knowledge/authentication.md` – added WebSocket auth table (Control UI = JWT only; local loopback non–Control-UI = JWT or legacy token/password). `knowledge/auth-impl-plan.md` – added Planned subsection for Option A, updated "WebSocket connection rejected" troubleshooting for CLI/tools. `docs/configuration/auth.md` – added "CLI and local connections" subsection. Implementation in message-handler and tests to follow.
+
 ### 2025-02-07 - Login URL and Asset Serving Fixes ✅
 
 - **Control UI server** (`src/gateway/control-ui.ts`): Requests under `/login/` that are static assets (e.g. `/login/assets/*`, `/login/*.js`, `/login/*.css`) are now served as actual files from the UI root instead of `index.html`, fixing "Expected a JavaScript module but server responded with text/html" when opening e.g. `http://localhost:51442/login/overview`.
@@ -1416,9 +1421,14 @@ See [Authentication Documentation](https://docs.openclaw.ai/configuration/auth) 
 - Frontend auth unit tests (optional)
 - Security hardening (bcrypt, audit logging)
 
+### Planned: Option A – Local loopback legacy token fallback
+
+When session auth is enabled, the WebSocket handler currently accepts only JWT. CLI, node host, and tools (e.g. Cursor) that connect from the same machine send the legacy gateway token from config and receive "Token expired" (1008). **Option A** (chosen): allow legacy gateway token/password for connections from **local loopback** when the client is **not** Control UI; Control UI remains JWT-only. Documentation has been updated first (knowledge/authentication.md, docs/configuration/auth.md); implementation in `src/gateway/server/ws-connection/message-handler.ts` and tests follow.
+
 ### Next Action Items
 
-- All planned auth UI tasks are complete. Login redirect, /login asset serving, and navigation fixes are in place.
+- Implement Option A in the WebSocket message handler; add test for session auth + loopback legacy token.
+- All other planned auth UI tasks are complete. Login redirect, /login asset serving, and navigation fixes are in place.
 - **Remaining (optional):**
   - Fix GET /api/auth/me integration test (skipped; returns 401 in test env).
   - Frontend auth unit tests.
@@ -1496,20 +1506,17 @@ export AUTH_COOKIE_SECURE=false
 - `Access-Control-Allow-Credentials` header is set (handled automatically)
 - No conflicting CORS configuration
 
-#### Issue: WebSocket connection rejected
+#### Issue: WebSocket connection rejected (1008 "Token expired" / "Session expired")
 
-**Check**:
+**Control UI (browser):**
 
-- JWT token is being sent in WebSocket connection
-- Token hasn't expired (check token expiry time)
-- Error code 1008 indicates auth failure
+- JWT must be sent in `connect.auth.token`; token expires in 15 minutes (refresh runs 5 min before expiry).
+- Check that the refresh cookie is sent and that token refresh is succeeding (see "Token refresh fails / repeated logouts" above).
 
-**Debug**:
+**CLI, node host, or tools (e.g. Cursor) on the same machine:**
 
-```javascript
-// In browser console, check token
-JSON.parse(atob(localStorage.getItem("authToken").split(".")[1])).exp;
-```
+- When session auth is enabled, these clients currently get "Token expired" if they send only the legacy gateway token from config. Option A (planned) will allow legacy `gateway.auth.token` or `OPENCLAW_GATEWAY_TOKEN` (and password) for **local loopback** connections from non–Control-UI clients. Until that is implemented, ensure the client connects from localhost and that config has `gateway.auth.token` or the env var set; after Option A, that token will be accepted for loopback.
+- Error code 1008 indicates auth failure (missing/invalid JWT or, after Option A, invalid legacy token for loopback).
 
 #### Issue: Gateway fails to start with "Control UI authentication is required"
 

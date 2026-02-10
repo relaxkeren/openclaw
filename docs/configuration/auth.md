@@ -78,6 +78,15 @@ Failed login attempts are limited:
 - **Block**: 15 minutes after exceeding the limit
 - The UI shows a countdown when rate limited
 
+## CLI and local connections
+
+The **Control UI** (browser) must sign in with email and password and use the JWT for all HTTP and WebSocket requests. When you run the CLI, node host, or other tools (e.g. Cursor) on the **same machine** as the gateway, they can connect to the gateway WebSocket using the legacy gateway token or password from config:
+
+- Set `gateway.auth.token` in your config (or `OPENCLAW_GATEWAY_TOKEN` in the environment), or
+- Set `gateway.auth.password` (or `OPENCLAW_GATEWAY_PASSWORD`)
+
+Connections from **local loopback** (localhost / 127.0.0.1) from these non-browser clients will be allowed to use that token or password for WebSocket auth. Remote connections must use a JWT (obtained via the Control UI login flow). This keeps CLI and tools working on the gateway host without implementing JWT refresh in those clients.
+
 ## Troubleshooting
 
 ### "Control UI authentication is required"

@@ -221,6 +221,14 @@ Control UI              Gateway
      │                      │
 ```
 
+**WebSocket auth when session auth is enabled:** The Control UI (browser) must use a JWT obtained via login; it sends it in `connect.auth.token`. Non–Control-UI clients (CLI, node host, Cursor tools, etc.) connecting from **local loopback** (same machine) may instead use the legacy gateway token or password from config (`gateway.auth.token`, `OPENCLAW_GATEWAY_TOKEN`, or `gateway.auth.password` / `OPENCLAW_GATEWAY_PASSWORD`). Remote connections must use JWT. This keeps CLI and tools working on the gateway host without implementing JWT refresh, while preserving JWT-only for browser and remote access.
+
+| Client                | Connection source | Auth accepted                            |
+| --------------------- | ----------------- | ---------------------------------------- |
+| Control UI (browser)  | Any               | JWT only (from login)                    |
+| CLI, node host, tools | Local loopback    | JWT or legacy token/password from config |
+| Any                   | Remote            | JWT only                                 |
+
 ### 5. Page Refresh / Session Recovery Flow
 
 ```

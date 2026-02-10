@@ -54,15 +54,6 @@ export function handleFirstUpdated(host: LifecycleHost) {
   observeTopbar(host as unknown as Parameters<typeof observeTopbar>[0]);
 }
 
-export async function handleAuthInitialized(isAuthenticated: boolean) {
-  // Auth is initialized - if authenticated, the app will connect to gateway
-  // If not authenticated, the login view will be shown
-  if (isAuthenticated) {
-    // Re-trigger connection if needed
-    // This is handled by the app component re-rendering and connecting
-  }
-}
-
 export function handleDisconnected(host: LifecycleHost) {
   window.removeEventListener("popstate", host.popStateHandler);
   stopNodesPolling(host as unknown as Parameters<typeof stopNodesPolling>[0]);
