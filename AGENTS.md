@@ -1,3 +1,12 @@
+# Working principles
+
+### Investigate/Debugging
+
+- Always explain the root cause of the problem
+- Give evidence to backup the claim of the causes.
+- Add debug logs to help with problem identification and isolation
+- Give resolution options rated with their complexity and risks.
+
 # Repository Guidelines
 
 - Repo: https://github.com/openclaw/openclaw

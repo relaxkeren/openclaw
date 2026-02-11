@@ -4,6 +4,8 @@ import path from "node:path";
 import { Logger as TsLogger } from "tslog";
 import type { OpenClawConfig } from "../config/types.js";
 import type { ConsoleStyle } from "./console.js";
+import { resolveStateDir } from "../config/paths.js";
+import { resolveUserPath } from "../utils.js";
 import { readLoggingConfig } from "./config.js";
 import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
 import { loggingState } from "./state.js";
@@ -12,6 +14,18 @@ import { loggingState } from "./state.js";
 // randomized path on macOS which made the “Open log” button a no-op.
 export const DEFAULT_LOG_DIR = "/tmp/openclaw";
 export const DEFAULT_LOG_FILE = path.join(DEFAULT_LOG_DIR, "openclaw.log"); // legacy single-file path
+
+/**
+ * Resolves the directory for file logs. When LOG_FOLDER is set, uses that path
+ * (supports ~); otherwise uses ~/.openclaw/logs/ (or $OPENCLAW_STATE_DIR/logs).
+ */
+export function resolveLogFolder(env: NodeJS.ProcessEnv = process.env): string {
+  const folder = env.LOG_FOLDER?.trim();
+  if (folder) {
+    return resolveUserPath(folder);
+  }
+  return path.join(resolveStateDir(env), "logs");
+}
 
 const LOG_PREFIX = "openclaw";
 const LOG_SUFFIX = ".log";
@@ -212,7 +226,7 @@ function formatLocalDate(date: Date): string {
 
 function defaultRollingPathForToday(): string {
   const today = formatLocalDate(new Date());
-  return path.join(DEFAULT_LOG_DIR, `${LOG_PREFIX}-${today}${LOG_SUFFIX}`);
+  return path.join(resolveLogFolder(), `${LOG_PREFIX}-${today}${LOG_SUFFIX}`);
 }
 
 function isRollingPath(file: string): boolean {
