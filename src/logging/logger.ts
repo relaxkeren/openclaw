@@ -5,6 +5,7 @@ import { Logger as TsLogger } from "tslog";
 import type { OpenClawConfig } from "../config/types.js";
 import type { ConsoleStyle } from "./console.js";
 import { resolveStateDir } from "../config/paths.js";
+import { stripAnsi } from "../terminal/ansi.js";
 import { resolveUserPath } from "../utils.js";
 import { readLoggingConfig } from "./config.js";
 import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
@@ -101,6 +102,43 @@ export function isFileLogLevelEnabled(level: LogLevel): boolean {
   return levelToMinLevel(level) <= levelToMinLevel(settings.level);
 }
 
+/** Extract message text from tslog log object (numeric keys only). */
+function extractMessageFromLogObj(logObj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const key of Object.keys(logObj)) {
+    if (!/^\d+$/.test(key)) continue;
+    const item = logObj[key];
+    if (typeof item === "string") {
+      parts.push(stripAnsi(item));
+    } else if (item != null) {
+      parts.push(JSON.stringify(item));
+    }
+  }
+  return parts.join(" ");
+}
+
+/** Parse subsystem from tslog _meta.name (JSON string). */
+function subsystemFromMeta(meta: Record<string, unknown> | undefined): string {
+  const raw = meta?.name;
+  if (typeof raw !== "string") return "openclaw";
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed.subsystem === "string" ? parsed.subsystem : "openclaw";
+  } catch {
+    return "openclaw";
+  }
+}
+
+/** Format one log entry as a human-readable line (like console, no JSON, no ANSI). */
+function formatLogObjToReadableLine(logObj: LogObj): string {
+  const time = logObj.date?.toISOString?.() ?? new Date().toISOString();
+  const meta = logObj._meta as Record<string, unknown> | undefined;
+  const level = (typeof meta?.logLevelName === "string" ? meta.logLevelName : "INFO").toLowerCase();
+  const subsystem = subsystemFromMeta(meta);
+  const message = extractMessageFromLogObj(logObj as Record<string, unknown>);
+  return `${time} [${subsystem}] ${level}: ${message}`;
+}
+
 function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
   fs.mkdirSync(path.dirname(settings.file), { recursive: true });
   // Clean up stale rolling logs when using a dated log filename.
@@ -115,8 +153,7 @@ function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
 
   logger.attachTransport((logObj: LogObj) => {
     try {
-      const time = logObj.date?.toISOString?.() ?? new Date().toISOString();
-      const line = JSON.stringify({ ...logObj, time });
+      const line = formatLogObjToReadableLine(logObj);
       fs.appendFileSync(settings.file, `${line}\n`, { encoding: "utf8" });
     } catch {
       // never block on logging failures
