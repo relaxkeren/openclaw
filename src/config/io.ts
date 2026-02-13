@@ -36,6 +36,26 @@ import { compareOpenClawVersions } from "./version.js";
 export { CircularIncludeError, ConfigIncludeError } from "./includes.js";
 export { MissingEnvVarError } from "./env-substitution.js";
 
+/**
+ * Strip comment keys (keys starting with "_") from config objects recursively.
+ * This allows users to add comments to JSON config files.
+ */
+function stripCommentKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripCommentKeys);
+  }
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      if (!key.startsWith("_")) {
+        result[key] = stripCommentKeys(val);
+      }
+    }
+    return result;
+  }
+  return value;
+}
+
 const SHELL_ENV_EXPECTED_KEYS = [
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
@@ -240,7 +260,10 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       // Substitute ${VAR} env var references
       const substituted = resolveConfigEnvVars(resolved, deps.env);
 
-      const resolvedConfig = substituted;
+      // Strip comment keys (starting with "_") before validation
+      const stripped = stripCommentKeys(substituted);
+
+      const resolvedConfig = stripped;
       warnOnConfigMiskeys(resolvedConfig, deps.logger);
       if (typeof resolvedConfig !== "object" || resolvedConfig === null) {
         return {};
@@ -421,7 +444,10 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
         };
       }
 
-      const resolvedConfigRaw = substituted;
+      // Strip comment keys (starting with "_") before validation
+      const stripped = stripCommentKeys(substituted);
+
+      const resolvedConfigRaw = stripped;
       const legacyIssues = findLegacyConfigIssues(resolvedConfigRaw);
 
       const validated = validateConfigObjectWithPlugins(resolvedConfigRaw);
