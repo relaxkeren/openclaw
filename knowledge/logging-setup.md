@@ -5,7 +5,7 @@ Internal reference for how logging is implemented: file appenders, log folder re
 ## Where logs go
 
 - **Main file log**: JSONL, one object per line. Default path is under a “log folder” (see below), filename `openclaw-YYYY-MM-DD.log`. Overridable via config `logging.file`.
-- **LLM prompt/response log**: File-only (no console). Same log folder, filename `openclaw-llm-YYYY-MM-DD.jsonl`. One JSON object per exchange (prompt, response, runId, sessionKey, provider, modelId, error).
+- **LLM prompt/response log**: File-only (no console). **Separate file** in the same log folder: `openclaw-llm-YYYY-MM-DD.jsonl`. One JSON object per exchange (ts, prompt, response, runId, sessionKey, provider, modelId, error). Not written to the main log file; check e.g. `~/.openclaw/logs/openclaw-llm-YYYY-MM-DD.jsonl` or `$LOG_FOLDER/openclaw-llm-*.jsonl`.
 - **Console**: TTY-aware formatting, subsystem prefixes, level/color. Controlled by `logging.consoleLevel` and `logging.consoleStyle`; `--verbose` only affects console, not file level.
 
 ## Log folder resolution
