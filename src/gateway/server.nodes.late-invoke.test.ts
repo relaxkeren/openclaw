@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
+import { login } from "./auth/session.js";
 
 vi.mock("../infra/update-runner.js", () => ({
   runGatewayUpdate: vi.fn(async () => ({
@@ -25,8 +26,8 @@ installGatewayTestHooks({ scope: "suite" });
 let server: Awaited<ReturnType<typeof startServerWithClient>>["server"];
 let ws: WebSocket;
 let port: number;
-let nodeWs: WebSocket;
-let nodeId: string;
+/** JWT or legacy token for connect; session auth uses JWT when AUTH_EMAIL/AUTH_PASSWORD are set. */
+let connectToken: string;
 
 beforeAll(async () => {
   const token = "test-gateway-token-1234567890";
@@ -34,61 +35,98 @@ beforeAll(async () => {
   server = started.server;
   ws = started.ws;
   port = started.port;
-  await connectOk(ws, { token });
-
-  nodeWs = new WebSocket(`ws://127.0.0.1:${port}`);
-  await new Promise<void>((resolve) => nodeWs.once("open", resolve));
-
-  const identity = loadOrCreateDeviceIdentity();
-  nodeId = identity.deviceId;
-  await connectOk(nodeWs, {
-    role: "node",
-    client: {
-      id: GATEWAY_CLIENT_NAMES.NODE_HOST,
-      version: "1.0.0",
-      platform: "darwin",
-      mode: GATEWAY_CLIENT_MODES.NODE,
-    },
-    commands: ["canvas.snapshot"],
-    token,
-  });
+  const loginResult = login("test@example.com", "test-password");
+  connectToken = loginResult.success ? loginResult.response.accessToken : token;
+  await connectOk(ws, { token: connectToken });
 });
 
 afterAll(async () => {
-  nodeWs.close();
   ws.close();
   await server.close();
 });
 
 describe("late-arriving invoke results", () => {
-  test("returns success for unknown invoke ids for both success and error payloads", async () => {
-    const cases = [
-      {
-        id: "unknown-invoke-id-12345",
-        ok: true,
-        payloadJSON: JSON.stringify({ result: "late" }),
-      },
-      {
-        id: "another-unknown-invoke-id",
-        ok: false,
-        error: { code: "FAILED", message: "test error" },
-      },
-    ] as const;
+  test("returns success for unknown invoke id (late arrival after timeout)", async () => {
+    // Create a node client WebSocket
+    const nodeWs = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise<void>((resolve) => nodeWs.once("open", resolve));
 
-    for (const params of cases) {
+    try {
+      // Connect as a node with device identity
+      const identity = loadOrCreateDeviceIdentity();
+      const nodeId = identity.deviceId;
+
+      await connectOk(nodeWs, {
+        role: "node",
+        client: {
+          id: GATEWAY_CLIENT_NAMES.NODE_HOST,
+          version: "1.0.0",
+          platform: "ios",
+          mode: GATEWAY_CLIENT_MODES.NODE,
+        },
+        commands: ["canvas.snapshot"],
+        token: connectToken,
+      });
+
+      // Send an invoke result with an unknown ID (simulating late arrival after timeout)
       const result = await rpcReq<{ ok?: boolean; ignored?: boolean }>(
         nodeWs,
         "node.invoke.result",
         {
-          ...params,
+          id: "unknown-invoke-id-12345",
           nodeId,
+          ok: true,
+          payloadJSON: JSON.stringify({ result: "late" }),
         },
       );
 
-      // Late-arriving results return success instead of error to reduce log noise.
+      // Late-arriving results return success instead of error to reduce log noise
       expect(result.ok).toBe(true);
       expect(result.payload?.ok).toBe(true);
       expect(result.payload?.ignored).toBe(true);
+    } finally {
+      nodeWs.close();
+    }
+  });
+
+  test("returns success for unknown invoke id with error payload", async () => {
+    // Verifies late results are accepted regardless of their ok/error status
+    const nodeWs = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise<void>((resolve) => nodeWs.once("open", resolve));
+
+    try {
+      await connectOk(nodeWs, {
+        role: "node",
+        client: {
+          id: GATEWAY_CLIENT_NAMES.NODE_HOST,
+          version: "1.0.0",
+          platform: "darwin",
+          mode: GATEWAY_CLIENT_MODES.NODE,
+        },
+        commands: [],
+        token: connectToken,
+      });
+
+      const identity = loadOrCreateDeviceIdentity();
+      const nodeId = identity.deviceId;
+
+      // Late invoke result with error payload - should still return success
+      const result = await rpcReq<{ ok?: boolean; ignored?: boolean }>(
+        nodeWs,
+        "node.invoke.result",
+        {
+          id: "another-unknown-invoke-id",
+          nodeId,
+          ok: false,
+          error: { code: "FAILED", message: "test error" },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.payload?.ok).toBe(true);
+      expect(result.payload?.ignored).toBe(true);
+    } finally {
+      nodeWs.close();
     }
   });
 });

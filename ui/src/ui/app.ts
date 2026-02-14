@@ -1,13 +1,13 @@
-import { LitElement } from "lit";
+import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { EventLogEntry } from "./app-events.ts";
 import type { AppViewState } from "./app-view-state.ts";
+import type { AuthState } from "./auth/types.ts";
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
-import type { Tab } from "./navigation.ts";
 import type { ResolvedTheme, ThemeMode } from "./theme.ts";
 import type {
   AgentsListResult,
@@ -77,9 +77,12 @@ import {
   type CompactionStatus,
 } from "./app-tool-stream.ts";
 import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
+import { authState, initAuth, login, clearError, subscribeAuthState } from "./auth/auth-context.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
+import { pathForTab, type Tab } from "./navigation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
+import { renderLogin } from "./views/login.ts";
 
 declare global {
   interface Window {
@@ -105,7 +108,6 @@ function resolveOnboardingMode(): boolean {
 @customElement("openclaw-app")
 export class OpenClawApp extends LitElement {
   @state() settings: UiSettings = loadSettings();
-  @state() password = "";
   @state() tab: Tab = "chat";
   @state() onboarding = resolveOnboardingMode();
   @state() connected = false;
@@ -160,6 +162,12 @@ export class OpenClawApp extends LitElement {
   @state() execApprovalBusy = false;
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
+
+  // Auth state
+  @state() auth: AuthState = authState;
+  @state() loginEmail = "";
+  @state() loginPassword = "";
+  private _authUnsubscribe: (() => void) | null = null;
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -353,12 +361,29 @@ export class OpenClawApp extends LitElement {
     handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
   }
 
-  protected firstUpdated() {
+  protected async firstUpdated() {
     handleFirstUpdated(this as unknown as Parameters<typeof handleFirstUpdated>[0]);
+
+    // Initialize auth - check for existing session (e.g. refresh from cookie)
+    await initAuth();
+
+    // Sync and re-render: auth may have changed during initAuth but we weren't subscribed yet
+    this.auth = { ...authState };
+    this.requestUpdate();
+
+    // Subscribe to auth state changes from here on
+    this._authUnsubscribe = subscribeAuthState(() => {
+      this.auth = { ...authState };
+      this.requestUpdate();
+    });
   }
 
   disconnectedCallback() {
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
+    if (this._authUnsubscribe) {
+      this._authUnsubscribe();
+      this._authUnsubscribe = null;
+    }
     super.disconnectedCallback();
   }
 
@@ -566,6 +591,87 @@ export class OpenClawApp extends LitElement {
   }
 
   render() {
+    // Show login view if not authenticated and auth is not loading
+    if (!this.auth.isAuthenticated && !this.auth.isLoading) {
+      return renderLogin({
+        email: this.loginEmail,
+        password: this.loginPassword,
+        isLoading: this.auth.isLoading,
+        error: this.auth.error?.message ?? null,
+        rateLimitCountdown: this.auth.rateLimitCountdown,
+        onEmailChange: (email) => {
+          this.loginEmail = email;
+        },
+        onPasswordChange: (password) => {
+          this.loginPassword = password;
+        },
+        onSubmit: async () => {
+          const success = await login(this.loginEmail, this.loginPassword);
+          if (success) {
+            // Clear login form and go to home (default tab)
+            this.loginEmail = "";
+            this.loginPassword = "";
+            const homePath = pathForTab("chat", this.basePath);
+            window.history.replaceState({}, "", homePath);
+            // Connect to gateway
+            this.connect();
+          }
+        },
+        onClearError: () => {
+          clearError();
+        },
+      });
+    }
+
+    // Show full-screen loading state while auth is initializing
+    if (this.auth.isLoading) {
+      return html`
+        <div class="auth-loading-screen">
+          <div class="auth-loading-content">
+            <div class="auth-loading-spinner"></div>
+            <p class="auth-loading-text">Checking authentication...</p>
+          </div>
+        </div>
+        <style>
+          .auth-loading-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(
+              135deg,
+              var(--bg-secondary, #1a1a2e) 0%,
+              var(--bg-primary, #16213e) 100%
+            );
+            color: var(--text-primary, #e8e8e8);
+          }
+          .auth-loading-content {
+            text-align: center;
+          }
+          .auth-loading-spinner {
+            width: 32px;
+            height: 32px;
+            margin: 0 auto 16px;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: auth-spin 0.8s linear infinite;
+          }
+          .auth-loading-text {
+            margin: 0;
+            font-size: 16px;
+            opacity: 0.9;
+          }
+          @keyframes auth-spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        </style>
+      `;
+    }
+
     return renderApp(this as unknown as AppViewState);
   }
 }

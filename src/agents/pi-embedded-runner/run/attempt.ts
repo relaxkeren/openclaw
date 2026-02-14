@@ -8,6 +8,7 @@ import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
+import { logLlmExchange } from "../../../logging/llm-file-log.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { isSubagentSessionKey, normalizeAgentId } from "../../../routing/session-key.js";
@@ -91,6 +92,32 @@ import { splitSdkTools } from "../tool-split.js";
 import { describeUnknownError, mapThinkingLevel } from "../utils.js";
 import { flushPendingToolResultsAfterIdle } from "../wait-for-idle-before-flush.js";
 import { detectAndLoadPromptImages } from "./images.js";
+
+/** Extract all text from an assistant message for LLM log (content blocks + errorMessage). */
+function extractTextFromAssistantMessage(
+  msg: { content?: unknown; errorMessage?: string } | undefined,
+): string | undefined {
+  if (!msg) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (typeof msg.content === "string") {
+    parts.push(msg.content);
+  } else if (Array.isArray(msg.content)) {
+    for (const block of msg.content) {
+      if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
+        const t = (block as { text?: string }).text;
+        if (typeof t === "string") {
+          parts.push(t);
+        }
+      }
+    }
+  }
+  if (typeof msg.errorMessage === "string" && msg.errorMessage.trim()) {
+    parts.push(msg.errorMessage.trim());
+  }
+  return parts.length > 0 ? parts.join("\n") : undefined;
+}
 
 export function injectHistoryImagesIntoMessages(
   messages: AgentMessage[],
@@ -875,6 +902,30 @@ export async function runEmbeddedAttempt(
           note: promptError ? "prompt error" : undefined,
         });
         anthropicPayloadLogger?.recordUsage(messagesSnapshot, promptError);
+
+        // Log prompt and LLM response to file only (no console). Prefer streamed assistantTexts; fallback to last assistant message in session so we capture the actual model reply (e.g. when stream wasn't captured).
+        const lastAssistantForLog = messagesSnapshot
+          .slice()
+          .toReversed()
+          .find((m) => m.role === "assistant") as
+          | { content?: unknown; errorMessage?: string }
+          | undefined;
+        const responseText =
+          assistantTexts.length > 0
+            ? assistantTexts.join("\n")
+            : extractTextFromAssistantMessage(lastAssistantForLog);
+        logLlmExchange({
+          prompt: effectivePrompt,
+          response: responseText ?? undefined,
+          meta: {
+            runId: params.runId,
+            sessionId: params.sessionId,
+            sessionKey: params.sessionKey,
+            provider: params.provider,
+            modelId: params.modelId,
+            error: promptError ? String(promptError) : undefined,
+          },
+        });
 
         // Run agent_end hooks to allow plugins to analyze the conversation
         // This is fire-and-forget, so we don't await

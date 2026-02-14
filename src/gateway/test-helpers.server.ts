@@ -50,6 +50,8 @@ let previousSkipBrowserControl: string | undefined;
 let previousSkipGmailWatcher: string | undefined;
 let previousSkipCanvasHost: string | undefined;
 let previousBundledPluginsDir: string | undefined;
+let previousAuthEmail: string | undefined;
+let previousAuthPassword: string | undefined;
 let tempHome: string | undefined;
 let tempConfigRoot: string | undefined;
 
@@ -90,11 +92,16 @@ async function setupGatewayTestHome() {
   previousSkipGmailWatcher = process.env.OPENCLAW_SKIP_GMAIL_WATCHER;
   previousSkipCanvasHost = process.env.OPENCLAW_SKIP_CANVAS_HOST;
   previousBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+  previousAuthEmail = process.env.AUTH_EMAIL;
+  previousAuthPassword = process.env.AUTH_PASSWORD;
   tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gateway-home-"));
   process.env.HOME = tempHome;
   process.env.USERPROFILE = tempHome;
   process.env.OPENCLAW_STATE_DIR = path.join(tempHome, ".openclaw");
   delete process.env.OPENCLAW_CONFIG_PATH;
+  // Set default auth so gateway can start (mandatory auth). Tests that assert missing auth override these.
+  process.env.AUTH_EMAIL = previousAuthEmail ?? "test@example.com";
+  process.env.AUTH_PASSWORD = previousAuthPassword ?? "test-password";
 }
 
 function applyGatewaySkipEnv() {
@@ -202,6 +209,16 @@ async function cleanupGatewayTestHome(options: { restoreEnv: boolean }) {
       delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
     } else {
       process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = previousBundledPluginsDir;
+    }
+    if (previousAuthEmail === undefined) {
+      delete process.env.AUTH_EMAIL;
+    } else {
+      process.env.AUTH_EMAIL = previousAuthEmail;
+    }
+    if (previousAuthPassword === undefined) {
+      delete process.env.AUTH_PASSWORD;
+    } else {
+      process.env.AUTH_PASSWORD = previousAuthPassword;
     }
   }
   if (options.restoreEnv && tempHome) {

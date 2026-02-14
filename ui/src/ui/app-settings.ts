@@ -36,7 +36,6 @@ import { resolveTheme, type ResolvedTheme, type ThemeMode } from "./theme.ts";
 
 type SettingsHost = {
   settings: UiSettings;
-  password?: string;
   theme: ThemeMode;
   themeResolved: ResolvedTheme;
   applySessionKey: string;
@@ -95,23 +94,14 @@ export function applySettingsFromUrl(host: SettingsHost) {
   const gatewayUrlRaw = params.get("gatewayUrl") ?? hashParams.get("gatewayUrl");
   let shouldCleanUrl = false;
 
-  if (tokenRaw != null) {
-    const token = tokenRaw.trim();
-    if (token && token !== host.settings.token) {
-      applySettings(host, { ...host.settings, token });
+  // Strip token/password from URL so they are not stored in history (values are not used; JWT auth only)
+  if (tokenRaw != null || passwordRaw != null) {
+    if (tokenRaw != null) {
+      params.delete("token");
     }
-    params.delete("token");
-    hashParams.delete("token");
-    shouldCleanUrl = true;
-  }
-
-  if (passwordRaw != null) {
-    const password = passwordRaw.trim();
-    if (password) {
-      (host as { password: string }).password = password;
+    if (passwordRaw != null) {
+      params.delete("password");
     }
-    params.delete("password");
-    hashParams.delete("password");
     shouldCleanUrl = true;
   }
 
@@ -317,7 +307,13 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
   }
-  const resolved = tabFromPath(window.location.pathname, host.basePath) ?? "chat";
+  const pathname = window.location.pathname;
+  // On login page, set tab for rendering but do not rewrite URL (stay on /login)
+  if (pathname === "/login" || pathname.endsWith("/login") || pathname.includes("/login/")) {
+    setTabFromRoute(host, "chat");
+    return;
+  }
+  const resolved = tabFromPath(pathname, host.basePath) ?? "chat";
   setTabFromRoute(host, resolved);
   syncUrlWithTab(host, resolved, replace);
 }

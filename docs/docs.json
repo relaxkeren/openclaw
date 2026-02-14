@@ -1105,6 +1105,7 @@
                       "gateway/configuration",
                       "gateway/configuration-reference",
                       "gateway/configuration-examples",
+                      "configuration/auth",
                       "gateway/authentication",
                       "gateway/health",
                       "gateway/heartbeat",

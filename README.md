@@ -110,6 +110,18 @@ OpenClaw connects to real messaging surfaces. Treat inbound DMs as **untrusted i
 
 Full security guide: [Security](https://docs.openclaw.ai/gateway/security)
 
+### Control UI authentication
+
+The gateway requires Control UI authentication: set both `AUTH_EMAIL` and `AUTH_PASSWORD` or the gateway will not start. Example:
+
+```bash
+export AUTH_EMAIL="admin@example.com"
+export AUTH_PASSWORD="your-secure-password"
+openclaw gateway run
+```
+
+See [Control UI Authentication](https://docs.openclaw.ai/configuration/auth) for details.
+
 Default behavior on Telegram/WhatsApp/Signal/iMessage/Microsoft Teams/Discord/Google Chat/Slack:
 
 - **DM pairing** (`dmPolicy="pairing"` / `channels.discord.dm.policy="pairing"` / `channels.slack.dm.policy="pairing"`): unknown senders receive a short pairing code and the bot does not process their message.

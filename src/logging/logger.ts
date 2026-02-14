@@ -4,13 +4,29 @@ import path from "node:path";
 import { Logger as TsLogger } from "tslog";
 import type { OpenClawConfig } from "../config/types.js";
 import type { ConsoleStyle } from "./console.js";
-import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
+import { resolveStateDir } from "../config/paths.js";
+import { stripAnsi } from "../terminal/ansi.js";
+import { resolveUserPath } from "../utils.js";
 import { readLoggingConfig } from "./config.js";
 import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
 import { loggingState } from "./state.js";
 
-export const DEFAULT_LOG_DIR = resolvePreferredOpenClawTmpDir();
+// Pin to /tmp so mac Debug UI and docs match; os.tmpdir() can be a per-user
+// randomized path on macOS which made the "Open log" button a no-op.
+export const DEFAULT_LOG_DIR = "/tmp/openclaw";
 export const DEFAULT_LOG_FILE = path.join(DEFAULT_LOG_DIR, "openclaw.log"); // legacy single-file path
+
+/**
+ * Resolves the directory for file logs. When LOG_FOLDER is set, uses that path
+ * (supports ~); otherwise uses ~/.openclaw/logs/ (or $OPENCLAW_STATE_DIR/logs).
+ */
+export function resolveLogFolder(env: NodeJS.ProcessEnv = process.env): string {
+  const folder = env.LOG_FOLDER?.trim();
+  if (folder) {
+    return resolveUserPath(folder);
+  }
+  return path.join(resolveStateDir(env), "logs");
+}
 
 const LOG_PREFIX = "openclaw";
 const LOG_SUFFIX = ".log";
@@ -86,6 +102,47 @@ export function isFileLogLevelEnabled(level: LogLevel): boolean {
   return levelToMinLevel(level) <= levelToMinLevel(settings.level);
 }
 
+/** Extract message text from tslog log object (numeric keys only). */
+function extractMessageFromLogObj(logObj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const key of Object.keys(logObj)) {
+    if (!/^\d+$/.test(key)) {
+      continue;
+    }
+    const item = logObj[key];
+    if (typeof item === "string") {
+      parts.push(stripAnsi(item));
+    } else if (item != null) {
+      parts.push(JSON.stringify(item));
+    }
+  }
+  return parts.join(" ");
+}
+
+/** Parse subsystem from tslog _meta.name (JSON string). */
+function subsystemFromMeta(meta: Record<string, unknown> | undefined): string {
+  const raw = meta?.name;
+  if (typeof raw !== "string") {
+    return "openclaw";
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed.subsystem === "string" ? parsed.subsystem : "openclaw";
+  } catch {
+    return "openclaw";
+  }
+}
+
+/** Format one log entry as a human-readable line (like console, no JSON, no ANSI). */
+function formatLogObjToReadableLine(logObj: LogObj): string {
+  const time = logObj.date?.toISOString?.() ?? new Date().toISOString();
+  const meta = logObj._meta as Record<string, unknown> | undefined;
+  const level = (typeof meta?.logLevelName === "string" ? meta.logLevelName : "INFO").toLowerCase();
+  const subsystem = subsystemFromMeta(meta);
+  const message = extractMessageFromLogObj(logObj as Record<string, unknown>);
+  return `${time} [${subsystem}] ${level}: ${message}`;
+}
+
 function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
   fs.mkdirSync(path.dirname(settings.file), { recursive: true });
   // Clean up stale rolling logs when using a dated log filename.
@@ -100,8 +157,7 @@ function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
 
   logger.attachTransport((logObj: LogObj) => {
     try {
-      const time = logObj.date?.toISOString?.() ?? new Date().toISOString();
-      const line = JSON.stringify({ ...logObj, time });
+      const line = formatLogObjToReadableLine(logObj);
       fs.appendFileSync(settings.file, `${line}\n`, { encoding: "utf8" });
     } catch {
       // never block on logging failures
@@ -211,7 +267,7 @@ function formatLocalDate(date: Date): string {
 
 function defaultRollingPathForToday(): string {
   const today = formatLocalDate(new Date());
-  return path.join(DEFAULT_LOG_DIR, `${LOG_PREFIX}-${today}${LOG_SUFFIX}`);
+  return path.join(resolveLogFolder(), `${LOG_PREFIX}-${today}${LOG_SUFFIX}`);
 }
 
 function isRollingPath(file: string): boolean {
