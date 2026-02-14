@@ -572,6 +572,28 @@ function buildChatCommands(): ChatCommandDefinition[] {
         },
       ],
     }),
+    defineChatCommand({
+      key: "run",
+      nativeName: "run",
+      description: "Run an executable from PATH.",
+      textAlias: "/run",
+      scope: "both",
+      category: "tools",
+      args: [
+        {
+          name: "name",
+          description: "Executable name",
+          type: "string",
+          required: true,
+        },
+        {
+          name: "args",
+          description: "Arguments",
+          type: "string",
+          captureRemaining: true,
+        },
+      ],
+    }),
     ...listChannelDocks()
       .filter((dock) => dock.capabilities.nativeCommands)
       .map((dock) => defineDockCommand(dock)),

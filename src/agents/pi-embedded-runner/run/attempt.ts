@@ -923,7 +923,11 @@ export async function runEmbeddedAttempt(
             sessionKey: params.sessionKey,
             provider: params.provider,
             modelId: params.modelId,
-            error: promptError ? String(promptError) : undefined,
+            error: promptError
+              ? promptError instanceof Error
+                ? promptError.message
+                : JSON.stringify(promptError)
+              : undefined,
           },
         });
 

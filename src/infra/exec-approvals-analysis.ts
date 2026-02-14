@@ -3,7 +3,20 @@ import os from "node:os";
 import path from "node:path";
 import type { ExecAllowlistEntry } from "./exec-approvals.js";
 
-export const DEFAULT_SAFE_BINS = ["jq", "grep", "cut", "sort", "uniq", "head", "tail", "tr", "wc"];
+export const DEFAULT_SAFE_BINS = [
+  "git",
+  "opencode",
+  "opencode-discord",
+  "jq",
+  "grep",
+  "cut",
+  "sort",
+  "uniq",
+  "head",
+  "tail",
+  "tr",
+  "wc",
+];
 
 function expandHome(value: string): string {
   if (!value) {

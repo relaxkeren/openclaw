@@ -282,7 +282,9 @@ export function handleControlUiHttpRequest(
       pathname.startsWith("/assets/") ||
       pathname.endsWith(".js") ||
       pathname.endsWith(".css") ||
-      pathname.endsWith(".ico");
+      pathname.endsWith(".ico") ||
+      pathname.endsWith(".svg") ||
+      pathname.endsWith(".png");
 
     if (!isPublicPath) {
       const authContext = buildAuthContext(req);

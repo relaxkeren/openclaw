@@ -338,7 +338,7 @@ export function login(
     };
   }
 
-  const { session, accessToken, refreshToken, accessTokenExpiresAtMs } = createSession(
+  const { accessToken, refreshToken, accessTokenExpiresAtMs } = createSession(
     email,
     ipAddress,
     userAgent,
@@ -376,7 +376,7 @@ export function refresh(
     };
   }
 
-  const { session, accessToken, newRefreshToken, accessTokenExpiresAtMs } = result;
+  const { accessToken, newRefreshToken, accessTokenExpiresAtMs } = result;
 
   return {
     success: true,
