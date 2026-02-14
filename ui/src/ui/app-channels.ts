@@ -71,14 +71,8 @@ function resolveGatewayHttpAuthHeader(host: OpenClawApp): string | null {
   if (deviceToken) {
     return `Bearer ${deviceToken}`;
   }
-  const token = host.settings.token.trim();
-  if (token) {
-    return `Bearer ${token}`;
-  }
-  const password = host.password.trim();
-  if (password) {
-    return `Bearer ${password}`;
-  }
+  // JWT auth: token/password are not stored in settings
+  // The auth header is handled by the auth context/token manager
   return null;
 }
 
